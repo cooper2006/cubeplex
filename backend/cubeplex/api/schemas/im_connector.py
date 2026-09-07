@@ -141,6 +141,36 @@ class IMAccountOut(BaseModel):
     bot_avatar_url: str | None = None
 
 
+
+
+class ConnectWeChatAccountIn(BaseModel):
+    """Payload for POST /ws/{ws}/im/accounts when platform == 'wechat'.
+
+    WeChat uses iLink protocol with QR code binding. The client may submit
+    an empty bot_token when qrcode_login is requested — the server
+    will generate a QR code and wait for the user to scan and confirm.
+    """
+
+    platform: Literal["wechat"] = "wechat"
+    bot_token: str = ""
+    qrcode_login: bool = False
+    acting_user_id: str = Field(default="self", min_length=1)
+
+
+class WeChatConnectOut(BaseModel):
+    """Response for POST /ws/{ws}/im/wechat/connect.
+
+    Returns the binding code and QR URL so the frontend can render the
+    connect dialog. The user must scan the QR and send /connect <code>
+    to the bot to complete binding.
+    """
+
+    code: str
+    qrcode_url: str | None
+    instruction: str
+    expires_in: int = 300
+    qr_generated_at: float | None = None
+
 class IMAccountListOut(BaseModel):
     accounts: list[IMAccountOut]
 
@@ -151,7 +181,8 @@ ConnectIMAccountIn = Annotated[
     | Annotated[ConnectSlackAccountIn, Tag("slack")]
     | Annotated[ConnectDingtalkAccountIn, Tag("dingtalk")]
     | Annotated[ConnectTeamsAccountIn, Tag("teams")]
-    | Annotated[ConnectWecomAccountIn, Tag("wecom")],
+    | Annotated[ConnectWecomAccountIn, Tag("wecom")]
+    | Annotated[ConnectWeChatAccountIn, Tag("wechat")],
     Discriminator("platform"),
 ]
 

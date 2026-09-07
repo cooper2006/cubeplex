@@ -4,6 +4,7 @@ export { slackDescriptor } from './slack'
 export { dingtalkDescriptor } from './dingtalk'
 export { teamsDescriptor } from './teams'
 export { wecomDescriptor } from './wecom'
+export { wechatDescriptor } from './wechat'
 export type {
   PlatformDescriptor,
   WizardStepDef,
@@ -18,6 +19,7 @@ import { feishuDescriptor } from './feishu'
 import { slackDescriptor } from './slack'
 import { teamsDescriptor } from './teams'
 import { wecomDescriptor } from './wecom'
+import { wechatDescriptor } from './wechat'
 import type { PlatformDescriptor } from './types'
 
 export const ALL_PLATFORMS: PlatformDescriptor[] = [
@@ -27,4 +29,5 @@ export const ALL_PLATFORMS: PlatformDescriptor[] = [
   dingtalkDescriptor,
   teamsDescriptor,
   wecomDescriptor,
+  wechatDescriptor,
 ]
