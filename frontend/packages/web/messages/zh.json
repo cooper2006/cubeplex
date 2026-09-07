@@ -1923,7 +1923,7 @@
     "deleteConversationDescription": "「{title}」将从历史记录中移除。消息将无法再在该对话中查看。相关产物将不再出现在库或对话面板中。",
     "deleteConversationConfirm": "删除",
     "deleteConversationCancel": "取消",
-    "deleteConversationDeleting": "删除中\u2026",
+    "deleteConversationDeleting": "删除中…",
     "deleteConversationFailed": "删除对话失败",
     "workspaceSettings": "工作区设置",
     "accountMenu": "账号菜单",
@@ -2501,6 +2501,9 @@
       },
       "wecom": {
         "label": "企业微信"
+      },
+      "wechat": {
+        "label": "微信"
       }
     },
     "status": {
@@ -2515,7 +2518,8 @@
       "enable": "启用",
       "delete": "删除",
       "deleteConfirm": "输入 {botName} 以确认",
-      "openWorkspace": "去 workspace 设置"
+      "openWorkspace": "去 workspace 设置",
+      "connected": "已连接"
     },
     "wizard": {
       "title": "连接 IM bot",
@@ -2633,7 +2637,31 @@
         "ready": "准备连接 <strong>{platform}</strong> bot <code>{appId}</code>。",
         "pressConnect": "点击 <strong>连接</strong> 注入 bot 身份并建立长连接。"
       },
-      "openExternalConsole": "在外部控制台打开"
+      "openExternalConsole": "在外部控制台打开",
+      "wechat": {
+        "label": "微信",
+        "prereq": {
+          "app": "已在微信公众号平台注册应用",
+          "bot": "已创建微信 iLink 机器人"
+        },
+        "field": {
+          "botToken": "Bot Token",
+          "qrcodeLogin": "扫码绑定",
+          "qrcodeLoginDesc": "勾选后无需输入 Token，将生成二维码供扫码绑定"
+        },
+        "step": {
+          "qrcode": "扫码绑定"
+        },
+        "qr": {
+          "loading": "正在生成二维码...",
+          "noQr": "无法获取二维码，请稍后重试",
+          "scanTitle": "用微信扫描下方二维码",
+          "scanHint": "扫描后会在微信中打开绑定页面",
+          "sendHint": "绑定完成后，向机器人发送以下指令完成绑定：",
+          "expiresIn": "连接码将于 {seconds} 秒后过期",
+          "refresh": "刷新"
+        }
+      }
     },
     "error": {
       "field": {

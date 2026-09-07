@@ -1923,7 +1923,7 @@
     "deleteConversationDescription": "\"{title}\" will be removed from your history. Messages will no longer be available in this conversation. Related artifacts will no longer appear in the library or the conversation panel.",
     "deleteConversationConfirm": "Delete",
     "deleteConversationCancel": "Cancel",
-    "deleteConversationDeleting": "Deleting\u2026",
+    "deleteConversationDeleting": "Deleting…",
     "deleteConversationFailed": "Failed to delete conversation",
     "workspaceSettings": "Workspace settings",
     "accountMenu": "Account menu",
@@ -2501,6 +2501,9 @@
       },
       "wecom": {
         "label": "WeCom"
+      },
+      "wechat": {
+        "label": "WeChat"
       }
     },
     "status": {
@@ -2515,7 +2518,8 @@
       "enable": "Enable",
       "delete": "Delete",
       "deleteConfirm": "Type {botName} to confirm",
-      "openWorkspace": "Open workspace settings"
+      "openWorkspace": "Open workspace settings",
+      "connected": "Connected"
     },
     "wizard": {
       "title": "Connect IM bot",
@@ -2633,7 +2637,31 @@
         "ready": "Ready to connect <strong>{platform}</strong> bot <code>{appId}</code>.",
         "pressConnect": "Press <strong>Connect</strong> to hydrate the bot identity and open the connection."
       },
-      "openExternalConsole": "Open external console"
+      "openExternalConsole": "Open external console",
+      "wechat": {
+        "label": "WeChat",
+        "prereq": {
+          "app": "Registered an app on WeChat Official Platform",
+          "bot": "Created a WeChat iLink bot"
+        },
+        "field": {
+          "botToken": "Bot Token",
+          "qrcodeLogin": "QR Code Binding",
+          "qrcodeLoginDesc": "No token needed; a QR code will be generated for scanning"
+        },
+        "step": {
+          "qrcode": "QR Code Binding"
+        },
+        "qr": {
+          "loading": "Generating QR code...",
+          "noQr": "Failed to get QR code, please try again",
+          "scanTitle": "Scan the QR code with WeChat",
+          "scanHint": "After scanning, the binding page will open in WeChat",
+          "sendHint": "After binding, send the following command to the bot to complete:",
+          "expiresIn": "Binding code expires in {seconds} seconds",
+          "refresh": "Refresh"
+        }
+      }
     },
     "error": {
       "field": {

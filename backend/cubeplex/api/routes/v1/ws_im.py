@@ -17,6 +17,7 @@ from cubeplex.api.schemas.im_connector import (
     ConnectIMAccountIn,
     ConnectSlackAccountIn,
     ConnectTeamsAccountIn,
+    ConnectWeChatAccountIn,
     ConnectWecomAccountIn,
     DingtalkAppsIn,
     DingtalkAppsOut,
@@ -25,6 +26,7 @@ from cubeplex.api.schemas.im_connector import (
     IMAccountListOut,
     IMAccountOut,
     ImRuntimeStatus,
+    WeChatConnectOut,
 )
 from cubeplex.auth.context import RequestContext
 from cubeplex.auth.dependencies import require_member
@@ -229,6 +231,33 @@ async def _connect_dingtalk(
     return _to_out(account)
 
 
+async def _connect_wechat(
+    body: ConnectWeChatAccountIn,
+    request: Request,
+    ctx: RequestContext,
+    session: AsyncSession,
+    backend: EncryptionBackend,
+) -> IMAccountOut:
+    svc = _service(session, backend, ctx)
+    acting = await _resolve_acting_user(body.acting_user_id, ctx, session)
+    try:
+        account = await svc.connect_wechat(
+            workspace_id=ctx.workspace_id,
+            bot_token=body.bot_token,
+            qrcode_login=body.qrcode_login,
+            acting_user_id=acting,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    starter = getattr(request.app.state, "im_connect_account", None)
+    if starter is not None and account.enabled:
+        try:
+            await starter(account)
+        except Exception:
+            logger.opt(exception=True).warning("[IM ws] wechat app init failed for {}", account.id)
+    return _to_out(account)
+
+
 async def _connect_teams(
     body: ConnectTeamsAccountIn,
     request: Request,
@@ -321,6 +350,8 @@ async def connect_account(
         return await _connect_teams(body, request, ctx, session, backend)
     elif isinstance(body, ConnectWecomAccountIn):
         return await _connect_wecom(body, request, ctx, session, backend)
+    elif isinstance(body, ConnectWeChatAccountIn):
+        return await _connect_wechat(body, request, ctx, session, backend)
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -615,4 +646,200 @@ async def list_identity_links(
             )
             for link, email, display_name in rows
         ]
+    )
+
+# ---------------------------------------------------------------------------
+# WeChat QR code binding endpoints
+# ---------------------------------------------------------------------------
+
+
+def _wechat_ilink_headers() -> dict[str, str]:
+    """Headers required by ilinkai.weixin.qq.com public endpoints."""
+    import base64
+    import secrets as _secrets
+
+    uin = base64.b64encode(str(_secrets.randbits(32)).encode("utf-8")).decode("utf-8")
+    return {
+        "Content-Type": "application/json",
+        "iLink-App-ClientVersion": "1",
+        "X-WECHAT-UIN": uin,
+    }
+
+
+async def _fetch_wechat_qrcode() -> tuple[str, str] | None:
+    """Fetch a fresh WeChat iLink QR and return (qrcode_string, ilink_url)."""
+    import httpx
+
+    params = {"bot_type": 3}
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(
+            "https://ilinkai.weixin.qq.com/ilink/bot/get_bot_qrcode",
+            params=params,
+            headers=_wechat_ilink_headers(),
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    qrcode = str(data.get("qrcode") or "").strip()
+    if not qrcode:
+        return None
+    ilink_url = f"https://liteapp.weixin.qq.com/q/7GiQu1?qrcode={qrcode}&bot_type=3"
+    return (qrcode, ilink_url)
+
+
+@router.post(
+    "/wechat/connect",
+    status_code=status.HTTP_201_CREATED,
+    response_model=WeChatConnectOut,
+)
+async def connect_wechat_qrcode(
+    workspace_id: str,
+    request: Request,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
+) -> WeChatConnectOut:
+    """Create a QR-code binding session for WeChat."""
+    if workspace_id != ctx.workspace_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="workspace mismatch")
+
+    svc = _service(session, backend, ctx)
+    redis = getattr(request.app.state, "redis", None)
+    key_prefix = getattr(request.app.state, "redis_key_prefix", "cubeplex")
+
+    if not redis:
+        raise HTTPException(status_code=503, detail="Redis is not available")
+
+    import asyncio
+
+    from cubeplex.models.im_connector import IMConnectorAccount
+
+    _lock_key = f"{key_prefix}:wechat:connect-lock:{workspace_id}"
+    _acquired = False
+    for _retry in range(3):
+        _acquired = await redis.set(_lock_key, "1", nx=True, ex=10)
+        if _acquired:
+            break
+        await asyncio.sleep(0.3)
+
+    if not _acquired:
+        await asyncio.sleep(1.0)
+
+    try:
+        pending = (
+            (
+                await session.execute(
+                    select(IMConnectorAccount).where(
+                        IMConnectorAccount.workspace_id == workspace_id,
+                        IMConnectorAccount.platform == "wechat",
+                        IMConnectorAccount.external_account_id.like("pending_%"),
+                    ).order_by(IMConnectorAccount.created_at.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if len(pending) > 1:
+            for extra in pending[1:]:
+                logger.info("[IM ws] removing duplicate pending wechat account {}", extra.id)
+                await session.delete(extra)
+            await session.commit()
+            pending = (
+                (
+                    await session.execute(
+                        select(IMConnectorAccount).where(
+                            IMConnectorAccount.workspace_id == workspace_id,
+                            IMConnectorAccount.platform == "wechat",
+                            IMConnectorAccount.external_account_id.like("pending_%"),
+                        ).order_by(IMConnectorAccount.created_at.desc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        pending = pending[0] if pending else None
+
+        if pending is None:
+            account = await svc.connect_wechat(
+                workspace_id=workspace_id,
+                qrcode_login=True,
+                acting_user_id=ctx.user.id,
+            )
+            pending = account
+    finally:
+        if _acquired:
+            await redis.delete(_lock_key)
+
+    gateways = getattr(request.app.state, "im_gateways", None) or {}
+    existing_gw = gateways.get(pending.id)
+    if existing_gw is None or not existing_gw.is_open:
+        starter = getattr(request.app.state, "im_connect_account", None)
+        if starter is not None:
+            try:
+                await starter(pending)
+            except Exception:
+                logger.opt(exception=True).warning("[IM ws] gateway startup failed for {}", pending.id)
+
+    gateways = getattr(request.app.state, "im_gateways", None) or {}
+    gw = gateways.get(pending.id)
+    qrcode_url = None
+    if gw is not None:
+        try:
+            qrcode_url = await gw.get_qrcode_url()
+            logger.info("[IM ws] gateway QR URL for account {}: {}", pending.id, qrcode_url)
+        except Exception:
+            logger.opt(exception=True).warning("[IM ws] failed to get QR URL for account {}", pending.id)
+    if not qrcode_url:
+        for _ in range(6):
+            await asyncio.sleep(0.5)
+            gateways = getattr(request.app.state, "im_gateways", None) or {}
+            gw = gateways.get(pending.id)
+            if gw is not None:
+                try:
+                    qrcode_url = await gw.get_qrcode_url()
+                    break
+                except Exception:
+                    pass
+    if not qrcode_url:
+        try:
+            qrcode_string, qrcode_url = await _fetch_wechat_qrcode()
+            if qrcode_url and gw is not None:
+                gw.sync_qrcode(qrcode_string, qrcode_url)
+        except Exception:
+            logger.opt(exception=True).warning("[IM ws] failed to fetch QR")
+
+    if not qrcode_url:
+        raise HTTPException(status_code=500, detail="Failed to generate QR code")
+
+    # Find or reuse binding code
+    from cubeplex.im.wechat.binding_state import (
+        consume_binding_state,
+        create_binding_state,
+        get_pending_binding_for_account,
+        store_pending_binding,
+    )
+
+    stored_code = await get_pending_binding_for_account(redis, key_prefix=key_prefix, account_id=pending.id)
+    payload = None
+    if stored_code:
+        payload = await consume_binding_state(redis, key_prefix=key_prefix, code=stored_code)
+        if payload is not None:
+            code = stored_code
+        else:
+            code = await create_binding_state(
+                redis, key_prefix=key_prefix, account_id=pending.id, qrcode=qrcode_url
+            )
+    else:
+        code = await create_binding_state(
+            redis, key_prefix=key_prefix, account_id=pending.id, qrcode=qrcode_url
+        )
+
+    await store_pending_binding(redis, key_prefix=key_prefix, account_id=pending.id, code=code)
+    logger.info("[IM ws] reusing existing binding code={} for account={}", code, pending.id)
+
+    return WeChatConnectOut(
+        code=code,
+        qrcode_url=qrcode_url,
+        instruction="扫描二维码后，在微信中发送 /connect <code> 完成绑定",
+        expires_in=300,
+        qr_generated_at=None,
     )

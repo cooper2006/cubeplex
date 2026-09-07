@@ -632,3 +632,148 @@ async def _handle_teams_link_command(
     text = f"Click to confirm your identity:\n{url}"
     if connector is not None:
         await connector.send_to_chat(event.channel_id, None, text)
+
+# ---------------------------------------------------------------------------
+# WeCom (企业微信) ingress
+# ---------------------------------------------------------------------------
+
+
+@router.post("/wecom/events")
+async def wecom_events(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
+) -> Response:
+    raw_body = await request.body()
+    signature = request.headers.get("signature", "")
+    timestamp = request.headers.get("timestamp", "")
+    nonce = request.headers.get("nonce", "")
+    echostr = request.query_params.get("echostr", "")
+
+    if echostr:
+        return Response(content=echostr, status_code=200)
+
+    enabled_accounts = (
+        await session.execute(
+            select(IMConnectorAccount).where(
+                IMConnectorAccount.platform == "wecom",
+                IMConnectorAccount.enabled == True,
+            )
+        )
+    ).scalars().all()
+
+    if not enabled_accounts:
+        return Response(status_code=status.HTTP_404_NOT_FOUND)
+
+    import xml.etree.ElementTree as ET
+
+    for account in enabled_accounts:
+        cred_service = build_credential_service(
+            session, backend, org_id=account.org_id, actor_user_id=None
+        )
+        try:
+            secret_json = await cred_service.get_decrypted(
+                credential_id=account.credential_id, requesting_kind="im_bot"
+            )
+        except Exception:
+            logger.opt(exception=True).warning("[WeCom ingress] credential decrypt failed for {}", account.id)
+            continue
+        candidate_secrets: dict[str, Any] = json.loads(secret_json)
+        token = str(candidate_secrets.get("token") or "")
+        if not token:
+            continue
+        from cubeplex.im.wecom.connector import WeComConnector
+        if not WeComConnector.verify_signature(token, timestamp, nonce, raw_body, signature):
+            continue
+        try:
+            root = ET.fromstring(raw_body)
+            def get_text(tag: str) -> str:
+                elem = root.find(tag)
+                return elem.text if elem is not None and elem.text else ""
+            msg_type = get_text("MsgType")
+            if msg_type not in ("text", "image", "voice", "video", "file"):
+                return Response(status_code=status.HTTP_200_OK)
+            event = WeComConnector().parse_inbound(raw_body)
+            if event is None:
+                return Response(status_code=status.HTTP_200_OK)
+            maker: async_sessionmaker[AsyncSession] = async_session_maker
+            result = await ingest_inbound_event(event, account=account, session_maker=maker)
+            logger.info("[WeCom ingress] {} {}: {}", account.id, event.platform_event_id, result.outcome)
+        except Exception:
+            logger.opt(exception=True).warning("[WeCom ingress] handle failed for {}", account.id)
+        return Response(status_code=status.HTTP_200_OK)
+
+    return Response(status_code=status.HTTP_401_UNAUTHORIZED)
+
+
+# ---------------------------------------------------------------------------
+# WeChat (公众号) ingress
+# ---------------------------------------------------------------------------
+
+
+@router.post("/wechat/events")
+async def wechat_events(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
+) -> Response:
+    raw_body = await request.body()
+    signature = request.args.get("signature", "") if request.query_params.get("signature") else request.headers.get("signature", "")
+    timestamp = request.query_params.get("timestamp", "")
+    nonce = request.query_params.get("nonce", "")
+    echostr = request.query_params.get("echostr", "")
+
+    if echostr:
+        return Response(content=echostr, status_code=200)
+
+    enabled_accounts = (
+        await session.execute(
+            select(IMConnectorAccount).where(
+                IMConnectorAccount.platform == "wechat",
+                IMConnectorAccount.enabled == True,
+            )
+        )
+    ).scalars().all()
+
+    if not enabled_accounts:
+        return Response(status_code=status.HTTP_404_NOT_FOUND)
+
+    import xml.etree.ElementTree as ET
+
+    for account in enabled_accounts:
+        cred_service = build_credential_service(
+            session, backend, org_id=account.org_id, actor_user_id=None
+        )
+        try:
+            secret_json = await cred_service.get_decrypted(
+                credential_id=account.credential_id, requesting_kind="im_bot"
+            )
+        except Exception:
+            logger.opt(exception=True).warning("[WeChat ingress] credential decrypt failed for {}", account.id)
+            continue
+        candidate_secrets: dict[str, Any] = json.loads(secret_json)
+        token = str(candidate_secrets.get("token") or "")
+        if not token:
+            continue
+        from cubeplex.im.wechat.connector import WeChatConnector
+        if not WeChatConnector.verify_signature(token, timestamp, nonce, signature):
+            continue
+        try:
+            root = ET.fromstring(raw_body)
+            def get_text(tag: str) -> str:
+                elem = root.find(tag)
+                return elem.text if elem is not None and elem.text else ""
+            msg_type = get_text("MsgType")
+            if msg_type not in ("text", "image", "voice", "video", "location", "link"):
+                return Response(status_code=status.HTTP_200_OK)
+            event = WeChatConnector().parse_inbound(raw_body)
+            if event is None:
+                return Response(status_code=status.HTTP_200_OK)
+            maker: async_sessionmaker[AsyncSession] = async_session_maker
+            result = await ingest_inbound_event(event, account=account, session_maker=maker)
+            logger.info("[WeChat ingress] {} {}: {}", account.id, event.platform_event_id, result.outcome)
+        except Exception:
+            logger.opt(exception=True).warning("[WeChat ingress] handle failed for {}", account.id)
+        return Response(status_code=status.HTTP_200_OK)
+
+    return Response(status_code=status.HTTP_401_UNAUTHORIZED)
