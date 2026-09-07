@@ -299,11 +299,16 @@ async def start(app: FastAPI, run_manager: Any) -> None:
 
     def _transport_is_open(account_id: str) -> bool:
         transport = _transport_for(account_id)
-        check = getattr(transport, "is_open", None)
-        if transport is None or not callable(check):
+        if transport is None:
             return False
+        check = getattr(transport, "is_open", None)
+        if check is None:
+            return False
+        # Handle both property and method
         try:
-            return bool(check())
+            if callable(check):
+                return bool(check())
+            return bool(check)
         except Exception:
             logger.opt(exception=True).warning(
                 "[IM] connection health check failed for {}",
@@ -500,6 +505,10 @@ async def start(app: FastAPI, run_manager: Any) -> None:
                     connection_closed=connection_closed,
                     terminal_disconnect=terminal_disconnect,
                 )
+                # DEBUG: Check gateway state
+                _t = _transport_for(account.id)
+                logger.info("[IM] DEBUG: account={}, transport={}, transport.is_open={}", 
+                    account.id, _t, getattr(_t, 'is_open', 'N/A') if _t else 'None')
                 if _transport_is_open(account.id):
                     await _connection_opened(account.id)
                 else:

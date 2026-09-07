@@ -145,8 +145,10 @@ class WeChatPlatform:
             redis_key_prefix=redis_key_prefix,
             encryption_backend=encryption_backend,
         )
-        await gw.start()
         gateways[account.id] = gw
+        logger.info("[WeChat] registered gateway for account {}, is_open before start: {}", account.id, gw.is_open)
+        await gw.start()
+        logger.info("[WeChat] gateway started for account {}, is_open after start: {}", account.id, gw.is_open)
 
     async def on_account_disabled(self, account: Any, **kwargs: Any) -> None:
         gateways: dict[str, Any] = kwargs.get("gateways", {})
