@@ -91,6 +91,13 @@ export interface ConnectWecomAccountIn {
   acting_user_id?: string
 }
 
+export interface ConnectWeChatAccountIn {
+  platform: 'wechat'
+  bot_token: string
+  qrcode_login: boolean
+  acting_user_id?: string
+}
+
 export type ConnectImAccountIn =
   | ConnectFeishuAccountIn
   | ConnectDiscordAccountIn
@@ -98,6 +105,7 @@ export type ConnectImAccountIn =
   | ConnectDingtalkAccountIn
   | ConnectTeamsAccountIn
   | ConnectWecomAccountIn
+  | ConnectWeChatAccountIn
 
 // ── Workspace scope ──────────────────────────────────────────────────────────
 
