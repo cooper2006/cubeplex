@@ -29,7 +29,15 @@ export const wechatDescriptor: PlatformDescriptor = {
       helpUrl: () => 'https://ilinkai.weixin.qq.com/',
     },
   ],
-  credentialFields: [],
+  credentialFields: [
+    {
+      key: 'bot_token',
+      labelKey: 'im.wizard.wechat.field.botToken',
+      type: 'password',
+      required: false,
+      placeholder: '输入 Bot Token（可选）',
+    },
+  ],
   steps: [
     {
       key: 'prereqs',
