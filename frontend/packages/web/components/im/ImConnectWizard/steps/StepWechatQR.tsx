@@ -25,7 +25,7 @@ interface Props extends WizardStepProps {
   wsId?: string
 }
 
-const QR_TTL_SECONDS = 20
+const QR_TTL_SECONDS = 60
 
 let _qrRefreshKey = 0
 

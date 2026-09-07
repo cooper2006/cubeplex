@@ -505,10 +505,6 @@ async def start(app: FastAPI, run_manager: Any) -> None:
                     connection_closed=connection_closed,
                     terminal_disconnect=terminal_disconnect,
                 )
-                # DEBUG: Check gateway state
-                _t = _transport_for(account.id)
-                logger.info("[IM] DEBUG: account={}, transport={}, transport.is_open={}", 
-                    account.id, _t, getattr(_t, 'is_open', 'N/A') if _t else 'None')
                 if _transport_is_open(account.id):
                     await _connection_opened(account.id)
                 else:
