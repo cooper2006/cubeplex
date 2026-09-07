@@ -639,6 +639,61 @@ class IMConnectorService:
             logger.exception("[IM] Slack auth.test probe failed")
             raise ValueError("could not validate Slack bot token") from None
 
+    async def connect_wechat(
+        self,
+        *,
+        workspace_id: str,
+        bot_token: str = "",
+        qrcode_login: bool = False,
+        acting_user_id: str = "self",
+    ) -> IMConnectorAccount:
+        """Bind one WeChat iLink bot."""
+        external_id = bot_token.strip() if bot_token.strip() else f"pending_{secrets.token_hex(8)}"
+
+        existing = (
+            await self._session.execute(
+                select(IMConnectorAccount).where(
+                    IMConnectorAccount.org_id == self._org_id,  # type: ignore[arg-type]
+                    IMConnectorAccount.platform == "wechat",  # type: ignore[arg-type]
+                    IMConnectorAccount.external_account_id == external_id,  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            raise ValueError(f"wechat account already exists for external_id={external_id}")
+
+        secret_payload = json.dumps({
+            "bot_token": bot_token,
+            "qrcode_login_enabled": qrcode_login,
+        })
+        try:
+            credential_id = await self._credentials.create(
+                kind="im_bot",
+                name=f"wechat:{external_id}",
+                plaintext=secret_payload,
+            )
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise ValueError(f"wechat account already exists for external_id={external_id} (credential race)") from exc
+        try:
+            account = IMConnectorAccount(
+                org_id=self._org_id,
+                workspace_id=workspace_id,
+                platform="wechat",
+                external_account_id=external_id,
+                acting_user_id=acting_user_id,
+                credential_id=credential_id,
+                delivery_mode="gateway",
+                config={"qrcode_login_enabled": qrcode_login},
+            )
+            self._session.add(account)
+            await self._session.commit()
+            await self._session.refresh(account)
+            return account
+        except Exception:
+            await self._session.rollback()
+            raise
+
     async def connect_dingtalk(
         self,
         *,
