@@ -29,26 +29,12 @@ export const wechatDescriptor: PlatformDescriptor = {
       helpUrl: () => 'https://ilinkai.weixin.qq.com/',
     },
   ],
-  credentialFields: [
-    {
-      key: 'bot_token',
-      labelKey: 'im.wizard.wechat.field.botToken',
-      type: 'password',
-      required: false,
-      placeholder: '输入 Bot Token（可选）',
-    },
-  ],
+  credentialFields: [],
   steps: [
     {
       key: 'prereqs',
       labelKey: 'im.wizard.step.prereqs',
       Component: StepPrereqs,
-      canAdvance: () => true,
-    },
-    {
-      key: 'credentials',
-      labelKey: 'im.wizard.step.credentials',
-      Component: StepCredentials,
       canAdvance: () => true,
     },
     {
