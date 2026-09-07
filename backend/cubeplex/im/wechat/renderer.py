@@ -58,7 +58,8 @@ class WeChatOpDispatcher:
     async def dispatch_finalize(self, state: Any) -> bool:
         """Send final message."""
         s = self._state
-        return await self.dispatch_stream(state, s.rendered_final or "")
+        final_text = getattr(getattr(s, "card_state", None), "streaming_content", "") or ""
+        return await self.dispatch_stream(state, final_text)
 
     async def dispatch_error(self, state: Any, error: str) -> bool:
         """Send error message."""
@@ -78,3 +79,7 @@ class WeChatOpDispatcher:
     def mark_edit_success(self, state: Any, msg_id: str) -> None:
         """Mark that an edit was successfully sent."""
         note_edit_success(self._state, msg_id)
+
+    async def aclose(self) -> None:
+        """Release resources. WeChat doesn't maintain persistent connections."""
+        pass
