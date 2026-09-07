@@ -243,6 +243,7 @@ async def start(app: FastAPI, run_manager: Any) -> None:
     import cubeplex.im.slack  # noqa: F401
     import cubeplex.im.teams  # noqa: F401
     import cubeplex.im.wecom  # noqa: F401
+    import cubeplex.im.wechat  # noqa: F401
 
     instance_id = str(uuid.uuid4())
 

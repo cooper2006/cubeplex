@@ -197,8 +197,8 @@
      - .uppercase auto-promotes to JetBrains Mono + 0.12em tracking
      ============================================================ */
   .operator-light {
-    --font-sans: var(--font-inter-tight), system-ui, -apple-system, sans-serif;
-    --font-mono: var(--font-jetbrains-mono), ui-monospace, 'SFMono-Regular', monospace;
+    --font-sans: system-ui, -apple-system, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
     --color-background: #fafafa; /* zinc-50 — the page */
     --color-foreground: #0a0a0b; /* zinc-950 — body ink */
@@ -246,8 +246,8 @@
   }
 
   .operator-dark {
-    --font-sans: var(--font-inter-tight), system-ui, -apple-system, sans-serif;
-    --font-mono: var(--font-jetbrains-mono), ui-monospace, 'SFMono-Regular', monospace;
+    --font-sans: system-ui, -apple-system, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
     --color-background: #18181b; /* zinc-900 — the canvas */
     --color-foreground: #f4f4f5; /* zinc-50 */

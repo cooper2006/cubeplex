@@ -22,7 +22,7 @@ interface WeChatQRData {
 }
 
 interface Props extends WizardStepProps {
-  wsId: string
+  wsId?: string
 }
 
 const QR_TTL_SECONDS = 20

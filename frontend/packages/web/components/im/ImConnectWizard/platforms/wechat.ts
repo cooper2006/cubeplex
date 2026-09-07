@@ -29,22 +29,7 @@ export const wechatDescriptor: PlatformDescriptor = {
       helpUrl: () => 'https://ilinkai.weixin.qq.com/',
     },
   ],
-  credentialFields: [
-    {
-      key: 'bot_token',
-      labelKey: 'im.wizard.wechat.field.botToken',
-      type: 'password',
-      required: false,
-      placeholder: '请输入 Bot Token（可选，可扫码绑定）',
-    },
-    {
-      key: 'qrcode_login',
-      labelKey: 'im.wizard.wechat.field.qrcodeLogin',
-      type: 'checkbox',
-      required: false,
-      descriptionKey: 'im.wizard.wechat.field.qrcodeLoginDesc',
-    },
-  ],
+  credentialFields: [],
   steps: [
     {
       key: 'prereqs',
@@ -56,7 +41,7 @@ export const wechatDescriptor: PlatformDescriptor = {
       key: 'credentials',
       labelKey: 'im.wizard.step.credentials',
       Component: StepCredentials,
-      canAdvance: (f) => !!(f.bot_token || f.qrcode_login),
+      canAdvance: () => true,
     },
     {
       key: 'qrcode',
