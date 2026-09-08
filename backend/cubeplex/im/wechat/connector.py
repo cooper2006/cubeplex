@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from loguru import logger
@@ -27,9 +26,11 @@ class WeChatConnector:
         *,
         chat_id: str = "",
         context_token: str | None = None,
+        gateway: Any = None,
     ) -> None:
         self._chat_id = chat_id
         self._context_token = context_token
+        self._gateway = gateway
 
     # ------------------------------------------------------------------
     # Lifecycle hooks (required by OutboundRunTailer)
@@ -52,6 +53,7 @@ class WeChatConnector:
         """Verify WeChat message signature (legacy webhook mode)."""
         import hashlib
         import hmac
+
         sorted_params = sorted([token, timestamp, nonce])
         raw = "".join(sorted_params)
         computed = hashlib.sha1(raw.encode()).hexdigest()
@@ -93,7 +95,9 @@ class WeChatConnector:
         # Truncate to 128 chars to match database VARCHAR(128) limits
         MAX_FIELD_LEN = 128
         from_user = from_user[:MAX_FIELD_LEN] if len(from_user) > MAX_FIELD_LEN else from_user
-        context_token = context_token[:MAX_FIELD_LEN] if len(context_token) > MAX_FIELD_LEN else context_token
+        context_token = (
+            context_token[:MAX_FIELD_LEN] if len(context_token) > MAX_FIELD_LEN else context_token
+        )
         msg_id = msg_id[:MAX_FIELD_LEN] if len(msg_id) > MAX_FIELD_LEN else msg_id
 
         scope_key = make_participant_scope(from_user)
@@ -111,6 +115,44 @@ class WeChatConnector:
             sender_open_id=from_user,
             text=text,
         )
+
+    async def send_to_chat(
+        self,
+        chat_id: str,
+        reply_to_id: str | None,
+        text: str,
+    ) -> str | None:
+        """Send text to chat via gateway. Returns the message id on success.
+
+        Matches the ``OutboundConnector`` protocol. iLink addresses a
+        conversation by ``context_token``, which the tailer carries as
+        ``reply_to_id``; the connector also remembers the one it was bound
+        with at tailer start.
+        """
+        context_token = reply_to_id or self._context_token
+        if not chat_id or not text or not context_token:
+            return None
+        if self._gateway is None:
+            return None
+        sent: str | None = await self._gateway.send_text(chat_id, context_token, text)
+        return sent
+
+    # iLink bots have no file/image upload API wired up yet. The artifact
+    # dispatcher falls back to a share link when these return False/None.
+    async def send_file(self, *, local_path: str, filename: str, mime: str | None) -> bool:
+        """Not supported yet — dispatcher falls back to a link."""
+        del local_path, filename, mime
+        return False
+
+    async def send_image(self, *, local_path: str, filename: str) -> bool:
+        """Not supported yet — dispatcher falls back to a link."""
+        del local_path, filename
+        return False
+
+    async def upload_image(self, local_path: str) -> str | None:
+        """Not supported yet."""
+        del local_path
+        return None
 
     @staticmethod
     def _extract_text(raw: dict[str, Any]) -> str:

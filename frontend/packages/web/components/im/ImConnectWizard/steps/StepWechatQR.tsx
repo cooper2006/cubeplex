@@ -25,7 +25,8 @@ interface Props extends WizardStepProps {
   wsId?: string
 }
 
-const QR_TTL_SECONDS = 60
+/** Fallback only — the backend returns the real TTL in `expires_in`. */
+const DEFAULT_TTL_SECONDS = 300
 
 let _qrRefreshKey = 0
 
@@ -33,18 +34,13 @@ let _qrRefreshKey = 0
  * Step that shows the WeChat QR code and binding instructions.
  * User scans QR, sends /connect <code> to bot, then clicks Done.
  */
-export function StepWechatQR({
-  descriptor,
-  form,
-  wsId,
-  onNext,
-}: Props): React.ReactElement {
+export function StepWechatQR({ descriptor, form, wsId }: Props): React.ReactElement {
   const t = useTranslations() as unknown as DynamicT
   const client = useMemo(() => createApiClient(''), [])
   const [qrData, setQrData] = useState<WeChatQRData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [remaining, setRemaining] = useState<number>(QR_TTL_SECONDS)
+  const [remaining, setRemaining] = useState<number>(DEFAULT_TTL_SECONDS)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   async function fetchQR() {
@@ -58,7 +54,7 @@ export function StepWechatQR({
       }
       const data = (await res.json()) as WeChatQRData
       setQrData(data)
-      startCountdown(data.qr_generated_at)
+      startCountdown(data.qr_generated_at, data.expires_in)
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to get QR code'
       setError(msg)
@@ -67,17 +63,20 @@ export function StepWechatQR({
     }
   }
 
-  function startCountdown(generatedAt: number | null) {
+  function startCountdown(generatedAt: number | null, expiresIn?: number) {
     if (intervalRef.current) clearInterval(intervalRef.current)
+    // Count down from when the QR was actually minted (backend clock), not
+    // from whenever this page happened to render.
+    const ttl = expiresIn && expiresIn > 0 ? expiresIn : DEFAULT_TTL_SECONDS
     const now = generatedAt ? generatedAt : Date.now() / 1000
-    const secsLeft = Math.max(0, QR_TTL_SECONDS - (Date.now() / 1000 - now))
+    const secsLeft = Math.max(0, ttl - (Date.now() / 1000 - now))
     setRemaining(Math.ceil(secsLeft))
     if (secsLeft <= 0) {
       void fetchQR()
       return
     }
     intervalRef.current = setInterval(() => {
-      const left = Math.ceil(QR_TTL_SECONDS - (Date.now() / 1000 - now))
+      const left = Math.ceil(ttl - (Date.now() / 1000 - now))
       setRemaining(left)
       if (left <= 0) {
         if (intervalRef.current) clearInterval(intervalRef.current)
@@ -149,12 +148,6 @@ export function StepWechatQR({
         >
           <RotateCw className="size-3 mr-1" />
           {t('im.wizard.wechat.qr.refresh')}
-        </Button>
-      </div>
-
-      <div className="flex justify-end">
-        <Button onClick={onNext}>
-          {t('im.action.connected')}
         </Button>
       </div>
     </div>

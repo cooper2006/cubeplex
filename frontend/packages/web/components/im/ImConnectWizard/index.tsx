@@ -53,6 +53,8 @@ export function ImConnectWizard({
     initialPlatform ? defaultsFor(initialPlatform) : {},
   )
   const mut = useConnectMutation(client, wsId)
+  const isLastStep = platform !== null && stepIdx === platform.steps.length - 1
+  const finishLabel = platform?.skipSubmit ? t('im.action.connected') : t('im.action.connect')
 
   function handleClose(): void {
     // Don't reset platform/stepIdx/form here — the wizard is unmounted by the parent
@@ -66,6 +68,12 @@ export function ImConnectWizard({
     if (!platform) return
     const isLast = stepIdx === platform.steps.length - 1
     if (isLast) {
+      if (platform.skipSubmit) {
+        // Nothing to POST: the wizard already bound the account (QR scan +
+        // /connect). Submitting here would create a duplicate account row.
+        onSuccess()
+        return
+      }
       const out = await mut.submit(platform.buildPayload(form))
       if (out) {
         toast.success(t('im.success.toast.connected'))
@@ -152,7 +160,7 @@ export function ImConnectWizard({
                   )
                 }
               >
-                {stepIdx === platform.steps.length - 1 ? t('im.action.connect') : 'Next'}
+                {isLastStep ? finishLabel : 'Next'}
               </Button>
             </div>
           </>

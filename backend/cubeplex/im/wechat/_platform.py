@@ -42,6 +42,7 @@ class WeChatPlatform:
         connector = WeChatConnector(
             chat_id=queue_item.channel_id,
             context_token=queue_item.reply_to_id,
+            gateway=gw,
         )
 
         cfg = account.config or {}
@@ -114,13 +115,16 @@ class WeChatPlatform:
         # app gives us the same encryption backend used by the credential vault,
         # needed to persist the bot_token once QR binding completes.
         app = kwargs.get("app")
-        encryption_backend = getattr(app, "state", None) and getattr(app.state, "encryption_backend", None)
+        app_state = getattr(app, "state", None)
+        encryption_backend = getattr(app_state, "encryption_backend", None)
 
         bot_token = str(secrets.get("bot_token") or "")
         qrcode_login_enabled = bool(secrets.get("qrcode_login_enabled", False))
 
         if not bot_token and not qrcode_login_enabled:
-            logger.warning("[WeChat] skipping account %s — missing bot_token and qrcode_login", account.id)
+            logger.warning(
+                "[WeChat] skipping account %s — missing bot_token and qrcode_login", account.id
+            )
             return
 
         existing = gateways.get(account.id)
@@ -146,9 +150,17 @@ class WeChatPlatform:
             encryption_backend=encryption_backend,
         )
         gateways[account.id] = gw
-        logger.info("[WeChat] registered gateway for account {}, is_open before start: {}", account.id, gw.is_open)
+        logger.info(
+            "[WeChat] registered gateway for account {}, is_open before start: {}",
+            account.id,
+            gw.is_open,
+        )
         await gw.start()
-        logger.info("[WeChat] gateway started for account {}, is_open after start: {}", account.id, gw.is_open)
+        logger.info(
+            "[WeChat] gateway started for account {}, is_open after start: {}",
+            account.id,
+            gw.is_open,
+        )
 
     async def on_account_disabled(self, account: Any, **kwargs: Any) -> None:
         gateways: dict[str, Any] = kwargs.get("gateways", {})

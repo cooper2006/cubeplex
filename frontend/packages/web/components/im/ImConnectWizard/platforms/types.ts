@@ -54,4 +54,11 @@ export type PlatformDescriptor = {
   buildPayload: (form: FormState) => ConnectImAccountIn
   identityField?: string
   scopeConsoleUrl: (appId: string) => string
+  /**
+   * QR-binding platforms bind inside the wizard itself (the QR step already
+   * created the account), so the final step must not POST /im/accounts —
+   * that would create a second, unusable pending account. When true,
+   * finishing just closes the wizard and refreshes the list.
+   */
+  skipSubmit?: boolean
 }
