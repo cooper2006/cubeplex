@@ -23,7 +23,7 @@ export function StepCredentials({
 }: WizardStepProps): React.ReactElement {
   const t = useTranslations() as unknown as DynamicT
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="grid grid-cols-1 gap-3">
       {descriptor.credentialFields.map((f) => {
         if (f.showIf && !f.showIf(form)) return null
         if (f.type === 'select' && f.options) {

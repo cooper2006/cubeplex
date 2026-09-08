@@ -1,6 +1,4 @@
-import { StepCredentials } from '../steps/StepCredentials'
 import { StepPrereqs } from '../steps/StepPrereqs'
-import { StepVerify } from '../steps/StepVerify'
 import { StepWechatQR } from '../steps/StepWechatQR'
 
 import type { PlatformDescriptor } from './types'
@@ -43,11 +41,6 @@ export const wechatDescriptor: PlatformDescriptor = {
       Component: StepWechatQR,
       canAdvance: () => true,
     },
-    {
-      key: 'verify',
-      labelKey: 'im.wizard.step.verify',
-      Component: StepVerify,
-    },
   ],
   buildPayload: (f) => ({
     platform: 'wechat' as const,
@@ -56,4 +49,5 @@ export const wechatDescriptor: PlatformDescriptor = {
     acting_user_id: 'self',
   }),
   scopeConsoleUrl: () => 'https://ilinkai.weixin.qq.com/',
+  skipSubmit: true,
 }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from typing import Any
 
@@ -33,22 +34,22 @@ class WeChatOpDispatcher:
         """Send streaming text update."""
         s = self._state
         # WeChat rate limit: ~1 msg/s for custom messages
-        now = state.time.monotonic()
+        now = time.monotonic()
         if now - self._last_send_time < 1.0:
             return False
         self._last_send_time = now
 
         try:
             msg_id = await self._connector.send_to_chat(
-                chat_id=self._connector._openid or state.chat_id,
-                reply_to_id=None,  # WeChat doesn't support reply IDs
-                text=text,
+                self._connector._chat_id,
+                state.reply_to_id,
+                text,
             )
             if msg_id:
                 s.bot_message_id = msg_id
                 return True
-        except WeChatRateLimitError as e:
-            note_flood_strike(self._state, e)
+        except WeChatRateLimitError:
+            note_flood_strike(self._state)
             return False
         except Exception:
             logger.exception("[WeChat] stream send failed")
@@ -63,7 +64,6 @@ class WeChatOpDispatcher:
 
     async def dispatch_error(self, state: Any, error: str) -> bool:
         """Send error message."""
-        s = self._state
         return await self.dispatch_stream(state, f"❌ Error: {error}")
 
     # ---- reaction helpers ----------------------------------------------
@@ -78,7 +78,7 @@ class WeChatOpDispatcher:
 
     def mark_edit_success(self, state: Any, msg_id: str) -> None:
         """Mark that an edit was successfully sent."""
-        note_edit_success(self._state, msg_id)
+        note_edit_success(self._state)
 
     async def aclose(self) -> None:
         """Release resources. WeChat doesn't maintain persistent connections."""

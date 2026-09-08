@@ -77,7 +77,18 @@ async def consume_binding_state(
         return None
     payload = json.loads(raw)
     logger.info("[WeChat] consumed binding code=%s for account=%s", code, payload.get("account_id"))
-    return payload
+    return payload if isinstance(payload, dict) else None
+
+
+async def delete_binding_state(
+    redis: Any,
+    *,
+    key_prefix: str,
+    code: str,
+) -> None:
+    """Invalidate a binding code so a stale one can never be redeemed."""
+    key = f"{key_prefix}:{_KEY_PATTERN.format(code=code)}"
+    await redis.delete(key)
 
 
 async def get_pending_binding(
@@ -91,7 +102,8 @@ async def get_pending_binding(
     raw = await redis.get(key)
     if not raw:
         return None
-    return json.loads(raw)
+    payload = json.loads(raw)
+    return payload if isinstance(payload, dict) else None
 
 
 # Redis key to track the current binding code for a pending account.
