@@ -498,6 +498,7 @@ async def start(app: FastAPI, run_manager: Any) -> None:
                     gateways=gateways,
                     session_maker=async_session_maker,
                     run_manager=run_manager,
+                    redis=app.state.redis,
                     redis_key_prefix=app.state.redis_key_prefix,
                     long_connections=app.state.im_long_connections,
                     app=app,

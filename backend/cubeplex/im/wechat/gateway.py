@@ -569,7 +569,8 @@ class WeChatGateway:
                 next_buf = data.get("get_updates_buf")
                 if isinstance(next_buf, str) and next_buf != self._get_updates_buf:
                     self._get_updates_buf = next_buf
-                for raw_msg in data.get("msgs", []):
+                msgs = data.get("msgs") or []
+                for raw_msg in msgs:
                     await self._handle_update(raw_msg)
             except asyncio.CancelledError:
                 raise
