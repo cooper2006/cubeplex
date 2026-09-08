@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from loguru import logger
@@ -24,6 +25,82 @@ from cubeplex.repositories.im_connector import (
 # then proactive fallback spends another. Keep the ownership fence well beyond
 # both windows plus database/network overhead.
 _COMMAND_LEASE_SECONDS = 60
+
+# Regex to extract /connect <code> from message text
+_CONNECT_CODE_PATTERN = re.compile(r"^/connect\s+(\S+)", re.IGNORECASE)
+
+
+def _extract_connect_code(text: str) -> str | None:
+    """Extract binding code from /connect <code> message."""
+    if not text:
+        return None
+    match = _CONNECT_CODE_PATTERN.match(text.strip())
+    return match.group(1) if match else None
+
+
+async def _handle_connect_code(
+    *,
+    event: Any,
+    raw: dict[str, Any],
+    account: IMConnectorAccount,
+    session_maker: async_sessionmaker[AsyncSession],
+    gateway: Any,
+    redis: Any,
+    redis_key_prefix: str,
+) -> bool:
+    """Handle /connect <code> binding for pending WeCom accounts.
+
+    Returns True if the message was handled (binding completed or failed),
+    False to continue with normal processing.
+    """
+    from cubeplex.im.wecom.binding_state import consume_binding_state
+
+    code = _extract_connect_code(event.text)
+    if not code or not redis:
+        return False
+
+    # Look up the binding state
+    payload = await consume_binding_state(
+        redis, key_prefix=redis_key_prefix, code=code
+    )
+    if payload is None:
+        # Invalid or expired code - send reply
+        await gateway.send_proactive(
+            event.channel_id,
+            {"msgtype": "markdown", "markdown": {"content": "连接码无效或已过期，请重新获取。"}},
+        )
+        logger.info("[WeCom] invalid/expired binding code={}", code)
+        return True
+
+    target_account_id = payload.get("account_id")
+    if target_account_id != account.id:
+        # Code belongs to a different account
+        await gateway.send_proactive(
+            event.channel_id,
+            {"msgtype": "markdown", "markdown": {"content": "该连接码不属于此账号，请使用正确的连接码。"}},
+        )
+        logger.info("[WeCom] binding code={} mismatch for account={}", code, account.id)
+        return True
+
+    # Valid binding - activate the account
+    async with session_maker() as session:
+        live_account = await session.get(IMConnectorAccount, account.id)
+        if live_account is None:
+            return True
+        live_account.external_account_id = str(
+            raw.get("body", {}).get("from", {}).get("userid", "") or account.external_account_id
+        )
+        live_account.enabled = True
+        await session.commit()
+
+    logger.info("[WeCom] binding code={} succeeded for account={}", code, account.id)
+
+    # Send success reply
+    await gateway.send_proactive(
+        event.channel_id,
+        {"msgtype": "markdown", "markdown": {"content": "企业微信绑定成功！现在可以使用该机器人了。"}},
+    )
+    return True
 
 
 def _delivery_error_code(response: dict[str, Any]) -> int:
@@ -97,6 +174,8 @@ async def handle_inbound_callback(
     account: IMConnectorAccount,
     session_maker: async_sessionmaker[AsyncSession],
     gateway: Any,
+    redis: Any = None,
+    redis_key_prefix: str = "cubeplex",
 ) -> None:
     """Route one WeCom callback through commands or ordinary ingestion."""
     async with session_maker() as session:
@@ -120,6 +199,21 @@ async def handle_inbound_callback(
     if event is None:
         return
     event.account_external_id = account.external_account_id
+
+    # Handle /connect <code> binding
+    connect_code = _extract_connect_code(event.text)
+    if connect_code:
+        handled = await _handle_connect_code(
+            event=event,
+            raw=raw,
+            account=account,
+            session_maker=session_maker,
+            gateway=gateway,
+            redis=redis,
+            redis_key_prefix=redis_key_prefix,
+        )
+        if handled:
+            return
 
     command = parse_command(event.text)
     if command is not None:

@@ -123,9 +123,13 @@ class WecomGateway:
         self._requests: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._passive: dict[str, _PassiveFrame] = {}
         self._poisoned_passive_ids: set[str] = set()
+        self._redis: Any = None
+        self._redis_key_prefix: str = "cubeplex"
 
-    def configure_inbound(self, *, account: Any, session_maker: Any) -> None:
+    def configure_inbound(self, *, account: Any, session_maker: Any, redis: Any = None, redis_key_prefix: str = "cubeplex") -> None:
         """Bind database-backed callback routing after gateway construction."""
+        self._redis = redis
+        self._redis_key_prefix = redis_key_prefix
 
         async def handle(raw: dict[str, Any]) -> None:
             from cubeplex.im.wecom.ingress import handle_inbound_callback
@@ -135,6 +139,8 @@ class WecomGateway:
                 account=account,
                 session_maker=session_maker,
                 gateway=self,
+                redis=redis,
+                redis_key_prefix=redis_key_prefix,
             )
 
         self._inbound_handler = handle

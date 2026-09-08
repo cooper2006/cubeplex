@@ -2629,6 +2629,16 @@
           "botName": "机器人名称",
           "botNameHint": "须与企业微信中显示的名称完全一致",
           "secret": "Secret"
+        },
+        "step": {
+          "binding": "绑定账号"
+        },
+        "binding": {
+          "loading": "正在生成连接码…",
+          "noCode": "无法获取连接码，请稍后重试",
+          "title": "请打开企业微信，找到该机器人后发送以下命令",
+          "expiresIn": "连接码将于 {seconds} 秒后过期",
+          "refresh": "刷新"
         }
       },
       "dingtalk": {

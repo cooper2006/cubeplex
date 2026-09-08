@@ -171,6 +171,19 @@ class WeChatConnectOut(BaseModel):
     expires_in: int = 300
     qr_generated_at: float | None = None
 
+
+class WeComConnectOut(BaseModel):
+    """Response for POST /ws/{ws}/im/wecom/connect.
+
+    Returns the binding code so the frontend can display instructions.
+    The user must open the bot in WeCom mobile and send /connect <code>
+    to complete binding.
+    """
+
+    code: str
+    instruction: str
+    expires_in: int = 300
+
 class IMAccountListOut(BaseModel):
     accounts: list[IMAccountOut]
 

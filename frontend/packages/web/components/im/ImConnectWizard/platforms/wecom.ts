@@ -1,6 +1,5 @@
-import { StepCredentials } from '../steps/StepCredentials'
 import { StepPrereqs } from '../steps/StepPrereqs'
-import { StepVerify } from '../steps/StepVerify'
+import { StepWeComBinding } from '../steps/StepWeComBinding'
 import type { PlatformDescriptor } from './types'
 
 export const wecomDescriptor: PlatformDescriptor = {
@@ -61,9 +60,10 @@ export const wecomDescriptor: PlatformDescriptor = {
       canAdvance: (form) => !!(form.bot_id && form.bot_name?.trim() && form.secret),
     },
     {
-      key: 'verify',
-      labelKey: 'im.wizard.step.verify',
-      Component: StepVerify,
+      key: 'binding',
+      labelKey: 'im.wizard.wecom.step.binding',
+      Component: StepWeComBinding,
+      canAdvance: () => true,
     },
   ],
   buildPayload: (form) => ({
@@ -75,4 +75,5 @@ export const wecomDescriptor: PlatformDescriptor = {
   }),
   identityField: 'bot_id',
   scopeConsoleUrl: () => 'https://work.weixin.qq.com/wework_admin/frame#apps',
+  skipSubmit: true,
 }

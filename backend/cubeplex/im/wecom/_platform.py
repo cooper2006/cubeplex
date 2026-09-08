@@ -97,7 +97,14 @@ class WecomPlatform:
             disconnected=kwargs.get("connection_closed"),
             terminal_disconnect=kwargs.get("terminal_disconnect"),
         )
-        gateway.configure_inbound(account=account, session_maker=kwargs["session_maker"])
+        redis = kwargs.get("redis")
+        redis_key_prefix = kwargs.get("redis_key_prefix", "cubeplex")
+        gateway.configure_inbound(
+            account=account,
+            session_maker=kwargs["session_maker"],
+            redis=redis,
+            redis_key_prefix=redis_key_prefix,
+        )
         gateways[account.id] = gateway
         try:
             await gateway.start()
