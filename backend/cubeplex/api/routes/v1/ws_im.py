@@ -942,6 +942,8 @@ async def connect_wechat_qrcode(
         code=code,
         qrcode_url=qrcode_url,
         instruction="扫描二维码后，在微信中发送 /connect <code> 完成绑定",
-        expires_in=300,
+        # iLink server-side QR expires in ~2 min; refresh well before that so
+        # the user never scans a dead code (frontend counts down on this value).
+        expires_in=110,
         qr_generated_at=gw.get_qr_generated_at() if gw is not None else None,
     )
