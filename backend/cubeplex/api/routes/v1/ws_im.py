@@ -28,6 +28,7 @@ from cubeplex.api.schemas.im_connector import (
     IMAccountOut,
     ImRuntimeStatus,
     WeChatConnectOut,
+    WeComConnectOut,
 )
 from cubeplex.auth.context import RequestContext
 from cubeplex.auth.dependencies import require_member
@@ -947,3 +948,159 @@ async def connect_wechat_qrcode(
         expires_in=110,
         qr_generated_at=gw.get_qr_generated_at() if gw is not None else None,
     )
+
+
+# ---------------------------------------------------------------------------
+# WeCom binding code endpoints
+# ---------------------------------------------------------------------------
+
+
+async def _connect_wecom_binding(
+    body: ConnectWecomAccountIn,
+    request: Request,
+    ctx: RequestContext,
+    session: AsyncSession,
+    backend: EncryptionBackend,
+) -> WeComConnectOut:
+    """Create a pending WeCom account and return a binding code.
+
+    Unlike the original flow which validates credentials upfront and starts
+    the gateway immediately, this version only persists the account and
+    exposes a binding code. The gateway will be started by the runtime once
+    the user sends ``/connect <code>`` from the WeCom client, at which point
+    the binding code is consumed and the account is marked enabled.
+    """
+    from cubeplex.im.wecom.binding_state import (
+        create_binding_state,
+        get_pending_binding_for_account,
+        store_pending_binding,
+    )
+
+    svc = _service(session, backend, ctx)
+    redis = getattr(request.app.state, "redis", None)
+    key_prefix = getattr(request.app.state, "redis_key_prefix", "cubeplex")
+
+    if not redis:
+        raise HTTPException(status_code=503, detail="Redis is not available")
+
+    # Reuse a stale pending account if one exists for this workspace,
+    # otherwise create a fresh one. The account stays disabled until the
+    # binding code is consumed.
+    pending_rows = (
+        (
+            await session.execute(
+                select(IMConnectorAccount).where(
+                    IMConnectorAccount.workspace_id == ctx.workspace_id,  # type: ignore[arg-type]
+                    IMConnectorAccount.platform == "wecom",  # type: ignore[arg-type]
+                    IMConnectorAccount.external_account_id.like("pending_%"),  # type: ignore[attr-defined]
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    pending = pending_rows[0] if pending_rows else None
+
+    if pending is None:
+        external_id = f"pending_{secrets.token_hex(8)}"
+        secret_payload = json.dumps(
+            {
+                "bot_id": body.bot_id,
+                "secret": body.secret,
+                "bot_open_id": body.bot_id,
+            }
+        )
+        try:
+            credential_id = await svc._credentials.create(
+                kind="im_bot",
+                name=f"wecom:{external_id}",
+                plaintext=secret_payload,
+            )
+        except Exception as exc:
+            raise ValueError(f"failed to create credential: {exc}") from exc
+        try:
+            pending = IMConnectorAccount(
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+                platform="wecom",
+                external_account_id=external_id,
+                acting_user_id=ctx.user.id,
+                credential_id=credential_id,
+                delivery_mode="gateway",
+                enabled=False,
+                config={"bot_app_name": (body.bot_name or "").strip()},
+            )
+            session.add(pending)
+            await session.commit()
+            await session.refresh(pending)
+        except Exception:
+            await session.rollback()
+            try:
+                await svc._credentials.delete(credential_id=credential_id)
+            except Exception:
+                pass
+            raise
+    else:
+        # Reuse existing pending — update config in case bot_name changed.
+        if pending.config is None:
+            pending.config = {}
+        if body.bot_name:
+            pending.config["bot_app_name"] = body.bot_name.strip()
+        await session.commit()
+
+    # Generate / refresh binding code
+    previous_code = await get_pending_binding_for_account(
+        redis, key_prefix=key_prefix, account_id=pending.id
+    )
+    keep_previous = False
+    if previous_code:
+        from cubeplex.im.wecom.binding_state import get_pending_binding
+
+        keep_previous = (
+            await get_pending_binding(redis, key_prefix=key_prefix, code=previous_code)
+            is not None
+        )
+
+    if keep_previous and previous_code:
+        code = previous_code
+    else:
+        if previous_code:
+            from cubeplex.im.wecom.binding_state import delete_binding_state
+
+            await delete_binding_state(redis, key_prefix=key_prefix, code=previous_code)
+        code = await create_binding_state(
+            redis, key_prefix=key_prefix, account_id=pending.id
+        )
+
+    await store_pending_binding(redis, key_prefix=key_prefix, account_id=pending.id, code=code)
+    logger.info("[IM ws] binding code={} for account={}", code, pending.id)
+
+    return WeComConnectOut(
+        code=code,
+        instruction="在企业微信中打开该机器人并发送 /connect <code> 完成绑定",
+        expires_in=110,
+    )
+
+
+@router.post(
+    "/wecom/connect",
+    status_code=status.HTTP_201_CREATED,
+    response_model=WeComConnectOut,
+)
+async def connect_wecom_binding(
+    workspace_id: str,
+    body: ConnectWecomAccountIn,
+    request: Request,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
+) -> WeComConnectOut:
+    """Create a pending WeCom account and return a binding code.
+
+    The user must send ``/connect <code>`` from the WeCom client to
+    activate the account.
+    """
+    if workspace_id != ctx.workspace_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="workspace mismatch")
+
+    return await _connect_wecom_binding(body, request, ctx, session, backend)

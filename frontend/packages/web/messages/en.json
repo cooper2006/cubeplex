@@ -2609,6 +2609,16 @@
           "botId": "Bot ID",
           "botName": "Bot name (exactly as shown in WeCom)",
           "secret": "Secret"
+        },
+        "step": {
+          "binding": "Bind Account"
+        },
+        "binding": {
+          "loading": "Generating binding code…",
+          "noCode": "Failed to get binding code, please try again",
+          "title": "Open WeCom, find this bot, and send the following command",
+          "expiresIn": "Binding code expires in {seconds} seconds",
+          "refresh": "Refresh"
         }
       },
       "dingtalk": {
