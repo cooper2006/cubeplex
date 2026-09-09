@@ -34,6 +34,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             enableSystem
             // Operator family stays registered so its CSS classes still resolve.
             themes={['light', 'dark', 'operator-light', 'operator-dark']}
+            // Mark the inline script as a data block so React 19 skips its
+            // dev-only "script tag in component" warning; SSR execution is unchanged.
+            scriptProps={{ type: 'text/javascript' }}
           >
             <DefaultThemeGuard />
             {children}
