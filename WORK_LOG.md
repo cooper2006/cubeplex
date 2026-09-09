@@ -67,3 +67,39 @@ b2db49a2 fix(wecom): dedupe stale pending accounts; fix(wecom): add missing Step
 - ✅ 后端运行中（端口 8000）
 - ✅ 前端运行中（端口 3000）
 - ✅ API 代理正常
+
+## 2026-09-09 (续) - 合并上游 cubeplexai/cubeplex 并刷新文档
+
+### 合并内容（origin/main → main）
+
+拉取上游 3 个提交：
+
+```
+a54442cf chore(release): bump version to 0.7.2
+ba632124 feat(im): deliver WeCom images and files both ways
+b932776c fix(im): stack WeCom credential fields in the connect wizard
+```
+
+**冲突处理**（WeCom 连接向导，本地 /connect 绑定改造 vs 上游 UI 布局优化）：
+1. `wecom.ts`：保留本地的 `binding` 步骤（`StepWeComBinding`）与 `skipSubmit: true`，
+   同时采用上游的 `fullWidth` 全宽字段布局与 `botNameHint` 提示；
+   删除因字段重排产生的重复 `bot_name` 字段。
+2. `StepCredentials.tsx`：采用上游响应式网格（`grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-3`），
+   配合 `fullWidth` 后 WeCom 三个凭证字段仍各占一整行。
+
+### 验证
+
+- ✅ 后端 WeCom 单元 + 集成测试：`tests/unit/im/wecom/` + `test_artifact_delivery.py` 共 65 项通过
+- ✅ 前端 `tsc --noEmit`（packages/web）通过
+- ✅ 文档站 `pnpm check`（Docusaurus en + zh-Hans 构建、typecheck、URL 规范检查、Worker 检查）通过
+- ✅ i18n 镜像（`docs/site/i18n/zh-Hans/.../current`）与英文文档结构一致（42 文件）
+
+### 提交记录
+
+```
+7d6449d9 merge: sync upstream main — WeCom media delivery, stacked wizard fields, v0.7.2
+36562179 docs: update work log for WeCom binding fix
+2ad5c12a fix(wecom): start gateway for pending account to receive /connect messages
+```
+
+**推送状态**: ✅ 已推送到 https://github.com/cooper2006/cubeplex
