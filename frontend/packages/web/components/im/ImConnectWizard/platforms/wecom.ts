@@ -1,3 +1,4 @@
+import { StepCredentials } from '../steps/StepCredentials'
 import { StepPrereqs } from '../steps/StepPrereqs'
 import { StepWeComBinding } from '../steps/StepWeComBinding'
 import type { PlatformDescriptor } from './types'
