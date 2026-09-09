@@ -1096,6 +1096,19 @@ async def _connect_wecom_binding(
     await store_pending_binding(redis, key_prefix=key_prefix, account_id=pending.id, code=code)
     logger.info("[IM ws] binding code={} for account={}", code, pending.id)
 
+    # Start the gateway for the pending account so it can receive /connect messages
+    gateways = getattr(request.app.state, "im_gateways", None) or {}
+    existing_gw = gateways.get(pending.id)
+    if existing_gw is None or not existing_gw.is_open:
+        starter = getattr(request.app.state, "im_connect_account", None)
+        if starter is not None:
+            try:
+                await starter(pending)
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "[IM ws] WeCom gateway startup failed for {}", pending.id
+                )
+
     return WeComConnectOut(
         code=code,
         instruction="在企业微信中打开该机器人并发送 /connect <code> 完成绑定",
