@@ -39,3 +39,31 @@
 - **Commit**: `b2db49a2`
 - **Message**: fix(wecom): dedupe stale pending accounts; fix(wecom): add missing StepCredentials import and reorder credential fields
 - **推送到**: https://github.com/cooper2006/cubeplex (personal remote)
+
+## 2026-09-09 (续) - WeCom 绑定测试成功
+
+### 测试通过
+- ✅ WeCom 绑定流程正常
+- ✅ `/connect <code>` 消息能被成功消费
+- ✅ 账号正常启用
+
+### 新增修复
+- **Commit**: `2ad5c12a`
+- **Message**: fix(wecom): start gateway for pending account to receive /connect messages
+- **文件**: `backend/cubeplex/api/routes/v1/ws_im.py`
+- **说明**: 在绑定成功后启动 gateway，确保机器人能接收 `/connect` 消息
+
+### 最终提交记录
+```
+2ad5c12a fix(wecom): start gateway for pending account to receive /connect messages
+d217127d docs: 更新工作日志
+b2db49a2 fix(wecom): dedupe stale pending accounts; fix(wecom): add missing StepCredentials import and reorder credential fields
+1f164a4c feat(wecom): 采用 /connect <code> 绑定方式替代企业微信端验证
+```
+
+**推送状态**: ✅ 已推送到 https://github.com/cooper2006/cubeplex
+
+**服务状态**:
+- ✅ 后端运行中（端口 8000）
+- ✅ 前端运行中（端口 3000）
+- ✅ API 代理正常
