@@ -1,4 +1,5 @@
 import { StepPrereqs } from '../steps/StepPrereqs'
+import { StepCredentials } from '../steps/StepCredentials'
 import { StepWeComBinding } from '../steps/StepWeComBinding'
 import type { PlatformDescriptor } from './types'
 
@@ -30,15 +31,15 @@ export const wecomDescriptor: PlatformDescriptor = {
       required: true,
     },
     {
-      key: 'bot_name',
-      labelKey: 'im.wizard.wecom.field.botName',
-      type: 'text',
-      required: true,
-    },
-    {
       key: 'secret',
       labelKey: 'im.wizard.wecom.field.secret',
       type: 'password',
+      required: true,
+    },
+    {
+      key: 'bot_name',
+      labelKey: 'im.wizard.wecom.field.botName',
+      type: 'text',
       required: true,
     },
   ],

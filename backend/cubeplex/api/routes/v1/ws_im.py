@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -986,6 +987,11 @@ async def _connect_wecom_binding(
     # Reuse a stale pending account if one exists for this workspace,
     # otherwise create a fresh one. The account stays disabled until the
     # binding code is consumed.
+    #
+    # Re-binding reuses exactly ONE pending account. Leftover pending rows
+    # from an abandoned attempt would each get their own gateway, and the
+    # /connect message would be handled by a gateway that does not own the
+    # binding code on screen → "连接码无效或已过期".
     pending_rows = (
         (
             await session.execute(
@@ -993,13 +999,28 @@ async def _connect_wecom_binding(
                     IMConnectorAccount.workspace_id == ctx.workspace_id,  # type: ignore[arg-type]
                     IMConnectorAccount.platform == "wecom",  # type: ignore[arg-type]
                     IMConnectorAccount.external_account_id.like("pending_%"),  # type: ignore[attr-defined]
-                )
+                ).order_by(IMConnectorAccount.created_at.desc())  # type: ignore[attr-defined]
             )
         )
         .scalars()
         .all()
     )
     pending = pending_rows[0] if pending_rows else None
+    stale = pending_rows[1:]
+    if stale:
+        live_gateways = getattr(request.app.state, "im_gateways", None) or {}
+        for extra in stale:
+            logger.info("[IM ws] removing duplicate pending wecom account {}", extra.id)
+            stale_gw = live_gateways.pop(extra.id, None)
+            if stale_gw is not None:
+                try:
+                    await stale_gw.stop()
+                except Exception:
+                    logger.opt(exception=True).warning(
+                        "[IM ws] gateway stop failed for duplicate {}", extra.id
+                    )
+            await session.delete(extra)
+        await session.commit()
 
     if pending is None:
         external_id = f"pending_{secrets.token_hex(8)}"
