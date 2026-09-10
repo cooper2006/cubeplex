@@ -180,7 +180,15 @@ async def handle_inbound_callback(
     """Route one WeCom callback through commands or ordinary ingestion."""
     async with session_maker() as session:
         live_account = await session.get(IMConnectorAccount, account.id)
-        if live_account is None or not live_account.enabled:
+        if live_account is None:
+            return
+        # Pending accounts are created disabled and stay that way until a
+        # /connect code binds them; dropping them here would make the
+        # binding message unreachable. Explicitly disabled accounts are
+        # still dropped.
+        if not live_account.enabled and not str(
+            live_account.external_account_id
+        ).startswith("pending_"):
             return
         account = live_account
 

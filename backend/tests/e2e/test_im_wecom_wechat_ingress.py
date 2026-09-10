@@ -21,6 +21,8 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import NullPool
 
 from cubeplex.credentials.dependencies import build_credential_service
+from cubeplex.im.wecom.binding_state import create_binding_state
+from cubeplex.im.wecom.ingress import handle_inbound_callback
 from cubeplex.models.im_connector import (
     IMConnectorAccount,
     IMRunQueueItem,
@@ -134,6 +136,79 @@ async def _seeded_wecom_account(
 
         try:
             yield None
+        finally:
+            async with maker() as session:
+                await im_cleanup(
+                    session,
+                    account_ids=[account_id],
+                    credential_ids=[cred_id],
+                    ws_ids=[_WECOM_WS_ID],
+                    cleanup_conversations_in_ws=True,
+                )
+                await session.commit()
+    finally:
+        await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def _seeded_wecom_pending_account(
+    async_client: httpx.AsyncClient,
+) -> AsyncIterator[tuple[str, str, async_sessionmaker[Any]]]:
+    """Seed a PENDING WeCom account (disabled, gateway delivery mode).
+
+    Yields (account_id, credential_id, session_maker).
+    """
+    transport = getattr(async_client, "_transport", None)
+    asgi_transport: Any = transport
+    if asgi_transport is None or not hasattr(asgi_transport, "app"):
+        raise RuntimeError("async_client transport missing app")
+    app = asgi_transport.app
+    backend = app.state.encryption_backend
+
+    engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with maker() as session:
+            await im_seed_org_ws_user(
+                session, org_id=_WECOM_ORG_ID, ws_id=_WECOM_WS_ID, user_id=_WECOM_USER_ID
+            )
+            await session.commit()
+
+        secret_payload = {
+            "bot_id": _WECOM_CORP_ID,
+            "secret": "wecom_bind_secret",
+            "bot_open_id": _WECOM_CORP_ID,
+        }
+        async with maker() as session:
+            svc = build_credential_service(
+                session, backend, org_id=_WECOM_ORG_ID, actor_user_id=_WECOM_USER_ID
+            )
+            cred_id = await svc.create(
+                kind="im_bot",
+                name=f"wecom:pending_bindtest",
+                plaintext=json.dumps(secret_payload),
+            )
+            await session.commit()
+
+        account_id = "imac-wecomA-pending"
+        async with maker() as session:
+            await im_seed_account(
+                session,
+                account_id=account_id,
+                org_id=_WECOM_ORG_ID,
+                ws_id=_WECOM_WS_ID,
+                user_id=_WECOM_USER_ID,
+                credential_id=cred_id,
+                external_account_id="pending_bindtest",
+                delivery_mode="gateway",
+                platform="wecom",
+            )
+            account = await session.get(IMConnectorAccount, account_id)
+            account.enabled = False
+            await session.commit()
+
+        try:
+            yield account_id, cred_id, maker
         finally:
             async with maker() as session:
                 await im_cleanup(
@@ -335,6 +410,126 @@ async def test_wecom_unknown_corp_ack_dropped(
     )
     # No enabled WeCom accounts → 404
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# WeCom gateway /connect binding (pending account ingress)
+# ---------------------------------------------------------------------------
+
+
+def _wecom_ws_frame(*, user_id: str, content: str, msgid: str = "msg-bind-1") -> dict[str, Any]:
+    """Build a WeCom WS callback frame as WecomGateway._inbound_handler receives it."""
+    return {
+        "cmd": "aibot_msg_callback",
+        "headers": {"req_id": "req-bind-1"},
+        "body": {
+            "msgid": msgid,
+            "chattype": "single",
+            "from": {"userid": user_id},
+            "msgtype": "text",
+            "text": {"content": content},
+        },
+    }
+
+
+class _StubWecomGateway:
+    def __init__(self) -> None:
+        self.replies: list[tuple[str, dict[str, Any]]] = []
+
+    async def send_proactive(self, chat_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        self.replies.append((chat_id, body))
+        return {"errcode": 0}
+
+    def is_open(self) -> bool:
+        return True
+
+
+async def test_wecom_pending_account_connect_binds_and_enables(
+    async_client: httpx.AsyncClient,
+    _seeded_wecom_pending_account: tuple[str, str, async_sessionmaker[Any]],
+) -> None:
+    """A /connect message on a pending (disabled) account must bind it.
+
+    Regression: the ingress guard dropped every callback for disabled
+    accounts — which is exactly how pending accounts are stored until
+    /connect <code> binds them, so the binding code could never work.
+    """
+    transport = getattr(async_client, "_transport", None)
+    app = transport.app
+    account_id, _cred_id, maker = _seeded_wecom_pending_account
+
+    async with maker() as session:
+        account = await session.get(IMConnectorAccount, account_id)
+        assert account is not None
+        assert account.enabled is False
+
+    redis = app.state.redis
+    key_prefix = getattr(app.state, "redis_key_prefix", "cubeplex")
+    code = await create_binding_state(redis, key_prefix=key_prefix, account_id=account_id)
+
+    gateway = _StubWecomGateway()
+    raw = _wecom_ws_frame(user_id="wecom_bound_user", content=f"/connect {code}")
+    await handle_inbound_callback(
+        raw,
+        account=account,
+        session_maker=maker,
+        gateway=gateway,
+        redis=redis,
+        redis_key_prefix=key_prefix,
+    )
+
+    async with maker() as session:
+        bound = await session.get(IMConnectorAccount, account_id)
+        assert bound is not None
+        assert bound.enabled is True
+        assert bound.external_account_id == "wecom_bound_user"
+    assert any("绑定成功" in str(reply) for _, reply in gateway.replies)
+
+
+async def test_wecom_disabled_non_pending_account_drops_connect_message(
+    async_client: httpx.AsyncClient,
+    _seeded_wecom_account: None,
+) -> None:
+    """Explicitly disabled (non-pending) accounts must NOT process /connect."""
+    transport = getattr(async_client, "_transport", None)
+    app = transport.app
+    # Reuse the seeded enabled account, then disable it.
+    engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with maker() as session:
+            rows = (await session.execute(
+                select(IMConnectorAccount).where(
+                    IMConnectorAccount.workspace_id == _WECOM_WS_ID,  # type: ignore[arg-type]
+                    IMConnectorAccount.platform == "wecom",  # type: ignore[arg-type]
+                )
+            )).scalars().all()
+            target = next(a for a in rows if not str(a.external_account_id).startswith("pending_"))
+            target.enabled = False
+            await session.commit()
+
+        redis = app.state.redis
+        key_prefix = getattr(app.state, "redis_key_prefix", "cubeplex")
+        code = await create_binding_state(redis, key_prefix=key_prefix, account_id=target.id)
+
+        gateway = _StubWecomGateway()
+        raw = _wecom_ws_frame(user_id="wecom_stranger", content=f"/connect {code}")
+        await handle_inbound_callback(
+            raw,
+            account=target,
+            session_maker=maker,
+            gateway=gateway,
+            redis=redis,
+            redis_key_prefix=key_prefix,
+        )
+
+        async with maker() as session:
+            after = await session.get(IMConnectorAccount, target.id)
+            assert after is not None
+            assert after.enabled is False
+            assert gateway.replies == []
+    finally:
+        await engine.dispose()
 
 
 # ---------------------------------------------------------------------------
