@@ -132,3 +132,37 @@ b932776c fix(im): stack WeCom credential fields in the connect wizard
 - ✅ `tests/e2e/test_im_routes.py` 9 项通过（含新并发测试）
 - ✅ `tests/unit/im/wecom/` 56 项通过
 - ✅ 前端 `tsc --noEmit` 通过
+
+## 2026-09-10 (续) - WeCom /connect 绑定消息被 ingress 静默丢弃
+
+### 现象
+09:57 重新连接（pending 账号 `imac-1rmqEbaeastXHj`，锁修复后单一 pending ✓），
+gateway 启动成功（无失败日志），用户在企业微信发 `/connect <code>` 后账号
+始终不生效（`enabled` 仍为 `f`），日志中无任何 `[WeCom] inbound` / 绑定日志。
+
+### 根因
+`handle_inbound_callback`（`cubeplex/im/wecom/ingress.py`）开头的守卫
+`if live_account is None or not live_account.enabled: return`：
+pending 账号天生 `enabled=False`（绑定成功才置 True），所以 /connect
+绑定消息在到达绑定逻辑前就被静默丢弃。09-09 的 /connect 绑定特性引入
+pending 账号时没有放宽这个守卫 → 绑定流程自始不可用。
+
+### 修复
+- 守卫改为：pending_ 账号放行；显式禁用的非 pending 账号仍丢弃。
+- 回归测试（`test_im_wecom_wechat_ingress.py`）：
+  `test_wecom_pending_account_connect_binds_and_enables`（pending /connect →
+  enabled=True + external 换成发送者 userid + 回复"绑定成功"）与
+  `test_wecom_disabled_non_pending_account_drops_connect_message`（负向）。
+  红→绿已验证（旧守卫下前者必挂）。
+
+### 注意
+- 重载后 pending 账号的内存 gateway 被清空，向导需重新拉一次码
+  （倒计时到期自动 refetch 会同时重启 gateway）再发 /connect。
+- `test_im_wecom_wechat_ingress.py` 中 7 个既有 webhook 路由测试在本地
+  环境（`cubeplex_test` 库、缺 S3 rustfs bucket）下原本就失败，与本次改动无关
+  （stash 验证：未改动代码同样失败）。
+
+### 提交记录
+```
+b287ef80 fix(im): let pending WeCom accounts through the ingress enabled-guard
+```
