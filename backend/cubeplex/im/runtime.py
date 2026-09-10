@@ -645,12 +645,31 @@ async def start(app: FastAPI, run_manager: Any) -> None:
                 .scalars()
                 .all()
             )
+            # Pending accounts (external id "pending_...") are disabled by
+            # design until a /connect code binds them. Their gateways must
+            # keep running to receive that message, so they are kept and
+            # lease-renewed exactly like enabled gateway accounts.
+            pending_accounts = (
+                (
+                    await s.execute(
+                        select(IMConnectorAccount).where(
+                            IMConnectorAccount.delivery_mode.in_(  # type: ignore[attr-defined]
+                                ["long_connection", "gateway", "stream"]
+                            ),
+                            IMConnectorAccount.external_account_id.like("pending_%"),  # type: ignore[attr-defined]
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
         enabled_by_id = {account.id: account for account in all_accounts}
+        keep_by_id = {**enabled_by_id, **{a.id: a for a in pending_accounts}}
         for account_id in set(owned_accounts) | set(gateways) | set(app.state.im_long_connections):
-            if account_id not in enabled_by_id:
+            if account_id not in keep_by_id:
                 await _stop_local_connection(account_id, release=True)
 
-        for acct in all_accounts:
+        for acct in [*all_accounts, *pending_accounts]:
             if acct.id in owned_accounts:
                 owned = await renew_lease(
                     app.state.redis,

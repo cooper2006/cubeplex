@@ -247,6 +247,61 @@ async def test_concurrent_wecom_binding_connect_keeps_single_pending_account(
     assert deleted.status_code == 204, deleted.text
 
 
+async def test_lease_sweep_keeps_pending_wecom_gateway_alive(
+    async_client: httpx.AsyncClient,
+) -> None:
+    """The lease sweep must not stop gateways of pending accounts.
+
+    The pending account's gateway is the only path that can receive the
+    /connect binding message. The sweep used to stop every gateway whose
+    account was not enabled — killing the pending gateway within one
+    15s interval and making the binding code unreachable.
+    """
+    from tests.e2e.conftest import DEFAULT_WS_ID
+
+    bot_id = _unique_app_id("wecom-sweep")
+    with (
+        patch("cubeplex.im.wecom.gateway.WecomGateway.start", new_callable=AsyncMock),
+        patch("cubeplex.im.wecom.gateway.WecomGateway.stop", new_callable=AsyncMock),
+        patch("cubeplex.im.wecom.gateway.WecomGateway.is_open", return_value=True),
+    ):
+        create = await async_client.post(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/im/wecom/connect",
+            json={
+                "platform": "wecom",
+                "bot_id": bot_id,
+                "bot_name": "Cube Plex",
+                "secret": "wecom-secret",
+                "acting_user_id": "self",
+            },
+        )
+        assert create.status_code == 201, create.text
+
+    listed = await async_client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts")
+    assert listed.status_code == 200, listed.text
+    pending_rows = [
+        a
+        for a in listed.json()["accounts"]
+        if a["platform"] == "wecom" and str(a["external_account_id"]).startswith("pending_")
+    ]
+    assert pending_rows, "expected the /wecom/connect call to leave a pending account"
+    row = max(pending_rows, key=lambda a: str(a.get("created_at") or ""))
+
+    app = async_client._transport.app
+    assert getattr(app.state, "im_gateways", {}).get(row["id"]) is not None, (
+        "starter did not register the pending gateway"
+    )
+
+    # One manual sweep: the pending gateway must survive.
+    await app.state.im_reconcile_connections()
+    assert app.state.im_gateways.get(row["id"]) is not None, (
+        "sweep stopped the pending account's gateway — /connect can never arrive"
+    )
+
+    deleted = await async_client.delete(f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{row['id']}")
+    assert deleted.status_code == 204, deleted.text
+
+
 @patch("cubeplex.services.im_connector.IMConnectorService._hydrate_bot_info")
 async def test_workspace_connect_list_delete_feishu_account(
     mock_hydrate: Any,
