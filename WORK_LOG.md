@@ -166,3 +166,15 @@ pending 账号时没有放宽这个守卫 → 绑定流程自始不可用。
 ```
 b287ef80 fix(im): let pending WeCom accounts through the ingress enabled-guard
 ```
+
+### 续：pending gateway 又被 15s 租约 sweep 杀掉
+- 现象：ingress 修复后 /connect 消息仍到不了。redis 里没有 wecom pending 账号的
+  owner lease，也没有任何失败日志 → gateway 启动后 15-30s 内被 `_sweep_once`
+  停掉：sweep 只保留 enabled 账号的 gateway，而 pending 账号天生 disabled。
+- 修复（`runtime.py::_sweep_once`）：pending_ gateway 账号与 enabled 账号同批
+  保留 + 续租。
+- 回归：`test_lease_sweep_keeps_pending_wecom_gateway_alive`（手动跑一次
+  reconcile，断言 pending gateway 存活；红→绿已验证）。
+- 提交：`ebfc5e4c`
+- 注意：`cubeplex_test` 库若有残留账号，e2e 启动时会认领孤儿 lease 并尝试
+  真实 WS 连接，造成假失败/变慢——复现异常先 drop+migrate 测试库。
