@@ -39,8 +39,14 @@ export function StepWeComBinding({ descriptor, form, wsId }: Props): React.React
   const [error, setError] = useState<string | null>(null)
   const [remaining, setRemaining] = useState<number>(DEFAULT_TTL_SECONDS)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const inflightRef = useRef(false)
 
   async function fetchBinding() {
+    // StrictMode double-mounts effects in dev (and re-opening the tab
+    // remounts the step): never let two in-flight /wecom/connect calls
+    // race the backend's pending-account dedupe.
+    if (inflightRef.current) return
+    inflightRef.current = true
     try {
       setLoading(true)
       setError(null)
@@ -66,6 +72,7 @@ export function StepWeComBinding({ descriptor, form, wsId }: Props): React.React
       setError(msg)
     } finally {
       setLoading(false)
+      inflightRef.current = false
     }
   }
 

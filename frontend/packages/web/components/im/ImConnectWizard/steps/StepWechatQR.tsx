@@ -42,8 +42,14 @@ export function StepWechatQR({ descriptor, form, wsId }: Props): React.ReactElem
   const [error, setError] = useState<string | null>(null)
   const [remaining, setRemaining] = useState<number>(DEFAULT_TTL_SECONDS)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const inflightRef = useRef(false)
 
   async function fetchQR() {
+    // StrictMode double-mounts effects in dev (and re-opening the tab
+    // remounts the step): never let two in-flight /wechat/connect calls
+    // race the backend's pending-account dedupe.
+    if (inflightRef.current) return
+    inflightRef.current = true
     try {
       setLoading(true)
       setError(null)
@@ -60,6 +66,7 @@ export function StepWechatQR({ descriptor, form, wsId }: Props): React.ReactElem
       setError(msg)
     } finally {
       setLoading(false)
+      inflightRef.current = false
     }
   }
 
