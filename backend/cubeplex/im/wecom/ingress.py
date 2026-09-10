@@ -186,9 +186,9 @@ async def handle_inbound_callback(
         # /connect code binds them; dropping them here would make the
         # binding message unreachable. Explicitly disabled accounts are
         # still dropped.
-        if not live_account.enabled and not str(
-            live_account.external_account_id
-        ).startswith("pending_"):
+        if not live_account.enabled and not str(live_account.external_account_id).startswith(
+            "pending_"
+        ):
             return
         account = live_account
 

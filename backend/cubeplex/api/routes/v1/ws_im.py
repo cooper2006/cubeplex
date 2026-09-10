@@ -1012,14 +1012,13 @@ async def _connect_wecom_binding(
         pending_rows = (
             (
                 await session.execute(
-                    select(IMConnectorAccount).where(
-                        IMConnectorAccount.workspace_id
-                        == ctx.workspace_id,  # type: ignore[arg-type]
+                    select(IMConnectorAccount)
+                    .where(
+                        IMConnectorAccount.workspace_id == ctx.workspace_id,  # type: ignore[arg-type]
                         IMConnectorAccount.platform == "wecom",  # type: ignore[arg-type]
-                        IMConnectorAccount.external_account_id.like(
-                            "pending_%"
-                        ),  # type: ignore[attr-defined]
-                    ).order_by(IMConnectorAccount.created_at.desc())  # type: ignore[attr-defined]
+                        IMConnectorAccount.external_account_id.like("pending_%"),  # type: ignore[attr-defined]
+                    )
+                    .order_by(IMConnectorAccount.created_at.desc())  # type: ignore[attr-defined]
                 )
             )
             .scalars()

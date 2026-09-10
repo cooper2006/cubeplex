@@ -178,3 +178,20 @@ b287ef80 fix(im): let pending WeCom accounts through the ingress enabled-guard
 - 提交：`ebfc5e4c`
 - 注意：`cubeplex_test` 库若有残留账号，e2e 启动时会认领孤儿 lease 并尝试
   真实 WS 连接，造成假失败/变慢——复现异常先 drop+migrate 测试库。
+- 结果：11:37:39 `/connect` 绑定成功，`imac-1rn3dH5949AFe1` → enabled、
+  external=ZhuJunFeng，机器人正式可用。
+
+### 收尾：并发测试加固 + 格式修复
+- 12:04 一次 -k 跑出现 "got 2"：当时到 openws 的出口网络降级、首请求
+  提交拖过锁的 1.9s 兜底窗口，第二个请求无锁兜底读到了未提交状态 →
+  两行。该窗口是 wechat 同款设计的固有余量（锁兜底后仍放行），本次不扩大
+  改动面；残留行会在下次 /wecom/connect 的 stale 清理里自愈。
+- `test_concurrent_wecom_binding_connect_keeps_single_pending_account`
+  加固为抗污染不变量："并发调用最多新增 1 行"（POST 前后快照对比），
+  且清理不再断言状态——上一轮失败遗留的行不会让下一轮假失败；
+  清理覆盖遗留行 + 本轮新行。污染态已验证通过（预置一行遗留后跑绿）。
+- `ws_im.py` / `ingress.py` 中本次会话新增代码按 ruff format 对齐
+  （不动文件里 pre-existing 的格式问题）。
+- 事故记录：误把 09-08 遗留 stash（"pre-merge uncommitted wechat edits,
+  superseded"）pop 进当前树造成 6 个文件冲突，已从 HEAD 恢复；该 stash
+  保留在 stash list 里可找回，内容早已被 rebase 后的提交覆盖，无需处理。

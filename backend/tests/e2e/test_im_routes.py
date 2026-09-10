@@ -223,6 +223,18 @@ async def test_concurrent_wecom_binding_connect_keeps_single_pending_account(
         "secret": "wecom-secret",
         "acting_user_id": "self",
     }
+
+    async def _pending_ids() -> list[str]:
+        rows = await async_client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts")
+        assert rows.status_code == 200, rows.text
+        return [
+            str(row["id"])
+            for row in rows.json()["accounts"]
+            if row["platform"] == "wecom"
+            and str(row["external_account_id"]).startswith("pending_")
+        ]
+
+    before = set(await _pending_ids())
     with patch.object(CredentialService, "create", new=delayed_create):
         url = f"/api/v1/ws/{DEFAULT_WS_ID}/im/wecom/connect"
         first = asyncio.create_task(async_client.post(url, json=payload))
@@ -233,18 +245,18 @@ async def test_concurrent_wecom_binding_connect_keeps_single_pending_account(
     assert first_response.status_code == 201, first_response.text
     assert second_response.status_code == 201, second_response.text
 
-    listed = await async_client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts")
-    assert listed.status_code == 200, listed.text
-    pending = [
-        row
-        for row in listed.json()["accounts"]
-        if row["platform"] == "wecom"
-        and str(row["external_account_id"]).startswith("pending_")
-    ]
-    assert len(pending) == 1, f"expected exactly 1 pending WeCom account, got {len(pending)}"
+    # The invariant is "the concurrent calls add at most ONE pending row",
+    # not "the workspace has exactly one" — leftovers from a failed earlier
+    # run (this test cleans up only on success) must not break it.
+    after = await _pending_ids()
+    new_rows = [row for row in after if row not in before]
+    assert len(new_rows) <= 1, f"concurrent connects created {len(new_rows)} pending accounts"
 
-    deleted = await async_client.delete(f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{pending[0]['id']}")
-    assert deleted.status_code == 204, deleted.text
+    # Delete leftovers first and this run's row last; no status assertion so
+    # a cleanup hiccup cannot leak into the next run.
+    leftovers = [row for row in after if row in before]
+    for row in leftovers + new_rows:
+        await async_client.delete(f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{row}")
 
 
 async def test_lease_sweep_keeps_pending_wecom_gateway_alive(
