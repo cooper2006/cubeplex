@@ -22,6 +22,7 @@ from cubeplex.utils import log
 
 _MIN_AUTH_SECRET_LENGTH = 32
 _AUTH_SECRET_PLACEHOLDERS = {"replace_me", "use env"}
+_SANDBOX_CONFIG_PLACEHOLDERS = {"replace_me", "use env"}
 
 
 def validate_auth_secrets() -> None:
@@ -49,6 +50,30 @@ def validate_auth_secrets() -> None:
             raise RuntimeError(
                 f"{env_var} must be at least {_MIN_AUTH_SECRET_LENGTH} characters long"
             )
+
+
+def validate_sandbox_config() -> None:
+    """Require a complete OpenSandbox configuration before accepting requests."""
+    from cubeplex.config import config
+
+    if config.get("sandbox.enabled") is not True:
+        raise RuntimeError("CUBEPLEX_SANDBOX__ENABLED must be true")
+
+    for setting, env_var in (
+        ("sandbox.domain", "CUBEPLEX_SANDBOX__DOMAIN"),
+        ("sandbox.image", "CUBEPLEX_SANDBOX__IMAGE"),
+        ("sandbox.api_key", "CUBEPLEX_SANDBOX__API_KEY"),
+    ):
+        raw_value = config.get(setting)
+        value = str(raw_value).strip() if raw_value is not None else ""
+        normalized_value = value.lower()
+        if not value:
+            raise RuntimeError(f"{env_var} is required")
+        if (
+            normalized_value.startswith("change_me")
+            or normalized_value in _SANDBOX_CONFIG_PLACEHOLDERS
+        ):
+            raise RuntimeError(f"{env_var} must not use a placeholder value")
 
 
 def _build_encryption_backend() -> FernetBackend:
@@ -85,6 +110,7 @@ async def lifespan(_app: FastAPI):  # type: ignore
     log.init()
     logger.info("Application starting up")
     validate_auth_secrets()
+    validate_sandbox_config()
     _app.state.encryption_backend = _build_encryption_backend()
     _app.state.mcp_user_token_signer = _build_mcp_user_token_signer()
 
@@ -261,31 +287,21 @@ async def lifespan(_app: FastAPI):  # type: ignore
         logger.error("Failed to initialize parser registry: {}", str(e))
         raise
 
-    # Initialize SandboxManager and start cleanup loop
-    cleanup_task = None
-    try:
-        from cubeplex.config import config
-        from cubeplex.db.engine import async_session_maker
-        from cubeplex.sandbox.manager import init_sandbox_manager
+    # Sandbox execution is a required capability. Startup must fail rather than
+    # expose a chat-only instance if its manager cannot be initialized.
+    from cubeplex.config import config
+    from cubeplex.db.engine import async_session_maker
+    from cubeplex.sandbox.cleanup import sandbox_cleanup_loop
+    from cubeplex.sandbox.manager import init_sandbox_manager
 
-        sandbox_enabled = config.get("sandbox.enabled", False)
-        if sandbox_enabled:
-            manager = init_sandbox_manager(
-                async_session_maker,
-                _app.state.encryption_backend,
-            )
-            logger.info("SandboxManager initialized")
-
-            # Start background cleanup task
-            from cubeplex.sandbox.cleanup import sandbox_cleanup_loop
-
-            cleanup_interval = config.get("sandbox.cleanup_interval", 60)
-            cleanup_task = asyncio.create_task(
-                sandbox_cleanup_loop(manager, interval=cleanup_interval)
-            )
-            logger.info("Sandbox cleanup loop started")
-    except Exception as e:
-        logger.warning("Failed to initialize SandboxManager: {}", str(e))
+    manager = init_sandbox_manager(
+        async_session_maker,
+        _app.state.encryption_backend,
+    )
+    logger.info("SandboxManager initialized")
+    cleanup_interval = config.get("sandbox.cleanup_interval", 60)
+    cleanup_task = asyncio.create_task(sandbox_cleanup_loop(manager, interval=cleanup_interval))
+    logger.info("Sandbox cleanup loop started")
 
     # Seed preinstalled skills into the global catalog (idempotent, lock-guarded).
     try:
@@ -694,23 +710,16 @@ def create_app(
     app.include_router(ws_triggers.router, prefix="/api/v1")
     app.include_router(model_presets.router, prefix="/api/v1")
     app.include_router(trigger_ingest.router, prefix="/api/v1")
-    # Browser live-view/keepalive handlers require the SandboxManager, which is
-    # only initialized when sandbox support is enabled (see the lifespan above).
-    # Don't expose /browser/* otherwise — the handlers would 500 with
-    # "SandboxManager not initialized". Gate the API surface to match capability.
-    from cubeplex.config import config as _sandbox_config
+    from cubeplex.api.routes import sandbox_panel
+    from cubeplex.api.routes.v1 import sandbox_share
 
-    if _sandbox_config.get("sandbox.enabled", False):
-        from cubeplex.api.routes import sandbox_panel
-        from cubeplex.api.routes.v1 import sandbox_share
-
-        app.include_router(ws_browser.router, prefix="/api/v1")
-        app.include_router(sandbox_share.router, prefix="/api/v1")
-        # Panel reverse proxy is token-authed and mounted at root (NOT /api/v1):
-        # the panel client's asset/WebSocket sub-resources carry the token in the
-        # path, and it must not sit behind the frontend's /api/* rewrite (which
-        # cannot proxy WebSocket).
-        app.include_router(sandbox_panel.router)
+    app.include_router(ws_browser.router, prefix="/api/v1")
+    app.include_router(sandbox_share.router, prefix="/api/v1")
+    # Panel reverse proxy is token-authed and mounted at root (NOT /api/v1):
+    # the panel client's asset/WebSocket sub-resources carry the token in the
+    # path, and it must not sit behind the frontend's /api/* rewrite (which
+    # cannot proxy WebSocket).
+    app.include_router(sandbox_panel.router)
 
     from cubeplex.api.routes.health import router as health_router
 
