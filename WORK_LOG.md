@@ -103,3 +103,32 @@ b932776c fix(im): stack WeCom credential fields in the connect wizard
 ```
 
 **推送状态**: ✅ 已推送到 https://github.com/cooper2006/cubeplex
+
+## 2026-09-10 - WeCom 双 pending 复现（并发竞态）修复
+
+### 问题
+连接 WeCom 时又出现两个 pending 账号（`imac-1rmdNDaWH7i0cR` / `imac-1rmdNDKPfTnc9p`，同分钟创建）。
+
+### 根因
+09-09 的修复只覆盖"顺序重连"（读时去重）。这次是两个**并发**的 `/wecom/connect` 请求
+（dev 下 StrictMode 双挂载向导步骤 effect，两次请求都在对方插入前读到空 pending 表），
+各自建了一行 → 双 pending。
+
+### 修复
+1. **后端竞态锁**（`ws_im.py::_connect_wecom_binding`）：与 WeChat 流程对齐，在
+   "去重 + 创建/复用"临界段外加 `{prefix}:wecom:connect-lock:{workspace}` Redis 锁
+   （nx + 3 次重试 + 兜底 sleep），并发的两次调用串行化，后者读到前者的 pending 行。
+2. **前端防双发**（`StepWeComBinding` / `StepWechatQR`）：绑定 fetch 加 in-flight
+   守卫，StrictMode 双挂载 / 标签页重挂载不再触发两个并发请求。
+3. **E2E 回归**（`test_im_routes.py::test_concurrent_wecom_binding_connect_keeps_single_pending_account`）：
+   两个并发 /wecom/connect 必须收敛到恰好 1 个 pending 行（已做红→绿验证：
+   临时禁用锁 → 测试失败；恢复 → 通过）。
+
+### 清理
+- 数据库删除 2 条残留 pending 行（`im_connector_accounts`）
+- 后端热重载已加载新代码，旧 pending 账号的内存 gateway 随 worker 重启清空
+
+### 验证
+- ✅ `tests/e2e/test_im_routes.py` 9 项通过（含新并发测试）
+- ✅ `tests/unit/im/wecom/` 56 项通过
+- ✅ 前端 `tsc --noEmit` 通过
