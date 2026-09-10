@@ -984,90 +984,113 @@ async def _connect_wecom_binding(
     if not redis:
         raise HTTPException(status_code=503, detail="Redis is not available")
 
-    # Reuse a stale pending account if one exists for this workspace,
-    # otherwise create a fresh one. The account stays disabled until the
-    # binding code is consumed.
-    #
-    # Re-binding reuses exactly ONE pending account. Leftover pending rows
-    # from an abandoned attempt would each get their own gateway, and the
-    # /connect message would be handled by a gateway that does not own the
-    # binding code on screen → "连接码无效或已过期".
-    pending_rows = (
-        (
-            await session.execute(
-                select(IMConnectorAccount).where(
-                    IMConnectorAccount.workspace_id == ctx.workspace_id,  # type: ignore[arg-type]
-                    IMConnectorAccount.platform == "wecom",  # type: ignore[arg-type]
-                    IMConnectorAccount.external_account_id.like("pending_%"),  # type: ignore[attr-defined]
-                ).order_by(IMConnectorAccount.created_at.desc())  # type: ignore[attr-defined]
-            )
-        )
-        .scalars()
-        .all()
-    )
-    pending = pending_rows[0] if pending_rows else None
-    stale = pending_rows[1:]
-    if stale:
-        live_gateways = getattr(request.app.state, "im_gateways", None) or {}
-        for extra in stale:
-            logger.info("[IM ws] removing duplicate pending wecom account {}", extra.id)
-            stale_gw = live_gateways.pop(extra.id, None)
-            if stale_gw is not None:
-                try:
-                    await stale_gw.stop()
-                except Exception:
-                    logger.opt(exception=True).warning(
-                        "[IM ws] gateway stop failed for duplicate {}", extra.id
-                    )
-            await session.delete(extra)
-        await session.commit()
+    import asyncio
 
-    if pending is None:
-        external_id = f"pending_{secrets.token_hex(8)}"
-        secret_payload = json.dumps(
-            {
-                "bot_id": body.bot_id,
-                "secret": body.secret,
-                "bot_open_id": body.bot_id,
-            }
+    # Serialize concurrent /wecom/connect calls the way the WeChat flow does:
+    # without the lock, two in-flight calls both read an empty pending set and
+    # each create its own row → two pending accounts on screen.
+    _lock_key = f"{key_prefix}:wecom:connect-lock:{ctx.workspace_id}"
+    _acquired = False
+    for _retry in range(3):
+        _acquired = await redis.set(_lock_key, "1", nx=True, ex=10)
+        if _acquired:
+            break
+        await asyncio.sleep(0.3)
+
+    if not _acquired:
+        await asyncio.sleep(1.0)
+
+    try:
+        # Reuse a stale pending account if one exists for this workspace,
+        # otherwise create a fresh one. The account stays disabled until the
+        # binding code is consumed.
+        #
+        # Re-binding reuses exactly ONE pending account. Leftover pending rows
+        # from an abandoned attempt would each get their own gateway, and the
+        # /connect message would be handled by a gateway that does not own the
+        # binding code on screen → "连接码无效或已过期".
+        pending_rows = (
+            (
+                await session.execute(
+                    select(IMConnectorAccount).where(
+                        IMConnectorAccount.workspace_id
+                        == ctx.workspace_id,  # type: ignore[arg-type]
+                        IMConnectorAccount.platform == "wecom",  # type: ignore[arg-type]
+                        IMConnectorAccount.external_account_id.like(
+                            "pending_%"
+                        ),  # type: ignore[attr-defined]
+                    ).order_by(IMConnectorAccount.created_at.desc())  # type: ignore[attr-defined]
+                )
+            )
+            .scalars()
+            .all()
         )
-        try:
-            credential_id = await svc._credentials.create(
-                kind="im_bot",
-                name=f"wecom:{external_id}",
-                plaintext=secret_payload,
-            )
-        except Exception as exc:
-            raise ValueError(f"failed to create credential: {exc}") from exc
-        try:
-            pending = IMConnectorAccount(
-                org_id=ctx.org_id,
-                workspace_id=ctx.workspace_id,
-                platform="wecom",
-                external_account_id=external_id,
-                acting_user_id=ctx.user.id,
-                credential_id=credential_id,
-                delivery_mode="gateway",
-                enabled=False,
-                config={"bot_app_name": (body.bot_name or "").strip()},
-            )
-            session.add(pending)
+        pending = pending_rows[0] if pending_rows else None
+        stale = pending_rows[1:]
+        if stale:
+            live_gateways = getattr(request.app.state, "im_gateways", None) or {}
+            for extra in stale:
+                logger.info("[IM ws] removing duplicate pending wecom account {}", extra.id)
+                stale_gw = live_gateways.pop(extra.id, None)
+                if stale_gw is not None:
+                    try:
+                        await stale_gw.stop()
+                    except Exception:
+                        logger.opt(exception=True).warning(
+                            "[IM ws] gateway stop failed for duplicate {}", extra.id
+                        )
+                await session.delete(extra)
             await session.commit()
-            await session.refresh(pending)
-        except Exception:
-            await session.rollback()
+
+        if pending is None:
+            external_id = f"pending_{secrets.token_hex(8)}"
+            secret_payload = json.dumps(
+                {
+                    "bot_id": body.bot_id,
+                    "secret": body.secret,
+                    "bot_open_id": body.bot_id,
+                }
+            )
             try:
-                await svc._credentials.delete(credential_id=credential_id)
+                credential_id = await svc._credentials.create(
+                    kind="im_bot",
+                    name=f"wecom:{external_id}",
+                    plaintext=secret_payload,
+                )
+            except Exception as exc:
+                raise ValueError(f"failed to create credential: {exc}") from exc
+            try:
+                pending = IMConnectorAccount(
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    platform="wecom",
+                    external_account_id=external_id,
+                    acting_user_id=ctx.user.id,
+                    credential_id=credential_id,
+                    delivery_mode="gateway",
+                    enabled=False,
+                    config={"bot_app_name": (body.bot_name or "").strip()},
+                )
+                session.add(pending)
+                await session.commit()
+                await session.refresh(pending)
             except Exception:
-                pass
-            raise
-    else:
-        # Reuse existing pending — update config in case bot_name changed.
-        if pending.config is None:
-            pending.config = {}
-        if body.bot_name:
-            pending.config["bot_app_name"] = body.bot_name.strip()
-        await session.commit()
+                await session.rollback()
+                try:
+                    await svc._credentials.delete(credential_id=credential_id)
+                except Exception:
+                    pass
+                raise
+        else:
+            # Reuse existing pending — update config in case bot_name changed.
+            if pending.config is None:
+                pending.config = {}
+            if body.bot_name:
+                pending.config["bot_app_name"] = body.bot_name.strip()
+            await session.commit()
+    finally:
+        if _acquired:
+            await redis.delete(_lock_key)
 
     # Generate / refresh binding code
     previous_code = await get_pending_binding_for_account(

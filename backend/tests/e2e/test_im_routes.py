@@ -191,6 +191,62 @@ async def test_concurrent_wecom_connect_serializes_probe_for_same_bot_id(
     assert deleted.status_code == 204
 
 
+async def test_concurrent_wecom_binding_connect_keeps_single_pending_account(
+    async_client: httpx.AsyncClient,
+) -> None:
+    """Two in-flight /wecom/connect calls must converge on one pending account.
+
+    StrictMode double-mounts the binding step in dev, firing two concurrent
+    connects. Without the per-workspace connect lock each call reads an empty
+    pending set and creates its own row → two pending accounts on screen.
+    """
+    from cubeplex.services.credential import CredentialService
+    from tests.e2e.conftest import DEFAULT_WS_ID
+
+    bot_id = _unique_app_id("wecom-bind-race")
+    original_create = CredentialService.create
+    create_calls = 0
+
+    async def delayed_create(self, **kwargs: Any) -> Any:
+        # Delay the first create so the second request's pending-row read
+        # falls inside the first request's insert window.
+        nonlocal create_calls
+        create_calls += 1
+        if create_calls == 1:
+            await asyncio.sleep(0.8)
+        return await original_create(self, **kwargs)
+
+    payload = {
+        "platform": "wecom",
+        "bot_id": bot_id,
+        "bot_name": "Cube Plex",
+        "secret": "wecom-secret",
+        "acting_user_id": "self",
+    }
+    with patch.object(CredentialService, "create", new=delayed_create):
+        url = f"/api/v1/ws/{DEFAULT_WS_ID}/im/wecom/connect"
+        first = asyncio.create_task(async_client.post(url, json=payload))
+        await asyncio.sleep(0.05)
+        second = asyncio.create_task(async_client.post(url, json=payload))
+        first_response, second_response = await asyncio.gather(first, second)
+
+    assert first_response.status_code == 201, first_response.text
+    assert second_response.status_code == 201, second_response.text
+
+    listed = await async_client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts")
+    assert listed.status_code == 200, listed.text
+    pending = [
+        row
+        for row in listed.json()["accounts"]
+        if row["platform"] == "wecom"
+        and str(row["external_account_id"]).startswith("pending_")
+    ]
+    assert len(pending) == 1, f"expected exactly 1 pending WeCom account, got {len(pending)}"
+
+    deleted = await async_client.delete(f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{pending[0]['id']}")
+    assert deleted.status_code == 204, deleted.text
+
+
 @patch("cubeplex.services.im_connector.IMConnectorService._hydrate_bot_info")
 async def test_workspace_connect_list_delete_feishu_account(
     mock_hydrate: Any,
