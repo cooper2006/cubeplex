@@ -25,11 +25,21 @@ need a public callback URL, but the API service must be able to reach
 2. Complete the prerequisite checklist.
 3. Enter the Bot ID, exact displayed bot name, and Secret, then select **Connect**. CubePlex uses
    the displayed name to remove the bot mention from group messages, including names with spaces.
+4. The wizard shows a **binding code** with a countdown. CubePlex stored the account in a pending
+   state and opened the long connection; the code is valid for five minutes, and the wizard
+   refreshes it before it expires.
+5. In the WeCom client (desktop or mobile), send the bot:
 
-CubePlex validates the credentials before storing them encrypted. A successful bind opens the
-long connection immediately. WeCom permits one live consumer for a bot; connecting the same bot
-from another product can disconnect CubePlex. If this happens, disable and re-enable the account
-in CubePlex after stopping the competing client.
+   ```text
+   /connect <code>
+   ```
+
+   The bot replies that the binding succeeded. The account is now enabled and bound to the WeCom
+   user ID that sent the code, and your messages reach that user.
+
+WeCom permits one live consumer for a bot; connecting the same bot from another product can
+disconnect CubePlex. If this happens, disable and re-enable the account in CubePlex after
+stopping the competing client, then repeat the `/connect` step with a fresh code.
 
 ## Link your identity
 
@@ -65,12 +75,14 @@ and the agent is told it was ignored.
 ## Rotate credentials
 
 Delete the WeCom account in CubePlex, generate or copy the current Secret in WeCom, and connect
-the bot again. Disabling closes the socket immediately; re-enabling opens it again without an API
-restart.
+the bot again — the new account starts pending, so finish with a fresh `/connect <code>` as in
+the steps above. Disabling closes the socket immediately; re-enabling opens it again without an
+API restart.
 
 ## Current limits
 
-This connector supports WeCom AI Bots only. It does not support personal WeChat, callback-mode
-enterprise apps, QR-code setup, or interactive in-chat approval and question controls. Continue
-those pending-input steps in the CubePlex web UI. WeCom itself only delivers standalone image,
-file, and video callbacks in direct chats.
+This connector supports WeCom AI Bots only. It does not support callback-mode enterprise apps or
+interactive in-chat approval and question controls; continue those pending-input steps in the
+CubePlex web UI. WeCom itself only delivers standalone image, file, and video callbacks in
+direct chats. Personal WeChat is available through the separate [WeChat (iLink)](./wechat.md)
+connector.

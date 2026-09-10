@@ -76,6 +76,7 @@ const sidebars: SidebarsConfig = {
             'guides/im/teams',
             'guides/im/discord',
             'guides/im/wecom',
+            'guides/im/wechat',
           ],
         },
         {
